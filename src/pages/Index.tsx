@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { Shield, FileText, Scan, Lock, ArrowRight, AlertCircle } from 'lucide-react';
+import { Shield, FileText, Scan, Lock, ArrowRight, AlertCircle, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
@@ -10,6 +10,7 @@ import { ComparisonResults } from '@/components/ComparisonResults';
 import { PasswordDialog } from '@/components/PasswordDialog';
 import { extractTextFromDocument, DocumentExtractionResult, PasswordRequiredError, IncorrectPasswordError } from '@/lib/documentExtractor';
 import { compareTexts, ComparisonResult } from '@/lib/textComparator';
+import { demoSetMatching, demoSetMismatched, createDemoFile } from '@/lib/demoDocuments';
 
 type AppState = 'upload' | 'processing' | 'results';
 
@@ -44,6 +45,9 @@ const Index = () => {
   const [passwordRequest, setPasswordRequest] = useState<PasswordRequest | null>(null);
   const [passwordA, setPasswordA] = useState<string | undefined>(undefined);
   const [passwordB, setPasswordB] = useState<string | undefined>(undefined);
+  
+  // Demo mode state
+  const [demoContent, setDemoContent] = useState<{ a: string; b: string } | null>(null);
 
   const processDocument = async (
     file: File,
@@ -162,7 +166,61 @@ const Index = () => {
     setExtractedB(null);
     setComparisonResult(null);
     setError(null);
+    setDemoContent(null);
   }, []);
+  
+  const loadDemoSet = useCallback((demoSet: typeof demoSetMatching) => {
+    const fileA = createDemoFile(demoSet.documentA.fileName, demoSet.documentA.content);
+    const fileB = createDemoFile(demoSet.documentB.fileName, demoSet.documentB.content);
+    setFileA(fileA);
+    setFileB(fileB);
+    setDemoContent({ a: demoSet.documentA.content, b: demoSet.documentB.content });
+    setError(null);
+  }, []);
+  
+  const runDemoComparison = useCallback(async () => {
+    if (!demoContent || !fileA || !fileB) return;
+    
+    setError(null);
+    setAppState('processing');
+    setProcessingProgress({
+      documentA: { progress: 0, status: 'Processing demo document...' },
+      documentB: { progress: 0, status: 'Waiting...' }
+    });
+
+    // Simulate processing for demo
+    await new Promise(resolve => setTimeout(resolve, 500));
+    setProcessingProgress(prev => ({
+      ...prev,
+      documentA: { progress: 100, status: 'Complete' }
+    }));
+    
+    const resultA: DocumentExtractionResult = {
+      text: demoContent.a,
+      fileName: fileA.name,
+      fileType: 'pdf',
+      usedOCR: false
+    };
+    setExtractedA(resultA);
+
+    await new Promise(resolve => setTimeout(resolve, 500));
+    setProcessingProgress(prev => ({
+      ...prev,
+      documentB: { progress: 100, status: 'Complete' }
+    }));
+    
+    const resultB: DocumentExtractionResult = {
+      text: demoContent.b,
+      fileName: fileB.name,
+      fileType: 'pdf',
+      usedOCR: false
+    };
+    setExtractedB(resultB);
+
+    const comparison = compareTexts(resultA.text, resultB.text);
+    setComparisonResult(comparison);
+    setAppState('results');
+  }, [demoContent, fileA, fileB]);
 
   const canCompare = fileA && fileB;
 
@@ -263,7 +321,7 @@ const Index = () => {
             <div className="flex justify-center">
               <Button
                 size="lg"
-                onClick={handleCompare}
+                onClick={demoContent ? runDemoComparison : handleCompare}
                 disabled={!canCompare}
                 className="px-8"
               >
@@ -271,6 +329,43 @@ const Index = () => {
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             </div>
+            
+            {/* Demo Section */}
+            <Card className="border-dashed">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Play className="h-4 w-4" />
+                  Try Demo Documents
+                </CardTitle>
+                <CardDescription>
+                  Load sample documents to test the comparison feature.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Button
+                    variant="outline"
+                    onClick={() => loadDemoSet(demoSetMatching)}
+                    className="h-auto py-3 flex flex-col items-start text-left"
+                  >
+                    <span className="font-medium text-green-600 dark:text-green-400">✓ Matching Documents</span>
+                    <span className="text-xs text-muted-foreground mt-1">
+                      Two identical contract documents
+                    </span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => loadDemoSet(demoSetMismatched)}
+                    className="h-auto py-3 flex flex-col items-start text-left"
+                  >
+                    <span className="font-medium text-amber-600 dark:text-amber-400">✗ Mismatched Documents</span>
+                    <span className="text-xs text-muted-foreground mt-1">
+                      Contract with unauthorized changes
+                    </span>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
           </div>
         )}
 
