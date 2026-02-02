@@ -1,4 +1,4 @@
-import { CheckCircle2, XCircle, FileText, Scan, Download } from 'lucide-react';
+import { CheckCircle2, XCircle, FileText, Scan } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DiffViewer } from './DiffViewer';
@@ -19,66 +19,6 @@ export function ComparisonResults({
   documentB,
   onReset
 }: ComparisonResultsProps) {
-  const downloadReport = () => {
-    const report = generateReport(result, documentA, documentB);
-    const blob = new Blob([report], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'comparison-report.txt';
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const generateReport = (
-    result: ComparisonResult,
-    docA: DocumentExtractionResult,
-    docB: DocumentExtractionResult
-  ): string => {
-    const lines = [
-      '='.repeat(60),
-      'DOCUMENT COMPARISON REPORT',
-      '='.repeat(60),
-      '',
-      `Generated: ${new Date().toLocaleString()}`,
-      '',
-      '-'.repeat(60),
-      'DOCUMENTS COMPARED',
-      '-'.repeat(60),
-      `Document A: ${docA.fileName}`,
-      `  - Type: ${docA.fileType.toUpperCase()}`,
-      `  - OCR Used: ${docA.usedOCR ? 'Yes' : 'No'}`,
-      docA.usedOCR ? `  - OCR Confidence: ${docA.ocrConfidence?.toFixed(1)}%` : '',
-      '',
-      `Document B: ${docB.fileName}`,
-      `  - Type: ${docB.fileType.toUpperCase()}`,
-      `  - OCR Used: ${docB.usedOCR ? 'Yes' : 'No'}`,
-      docB.usedOCR ? `  - OCR Confidence: ${docB.ocrConfidence?.toFixed(1)}%` : '',
-      '',
-      '-'.repeat(60),
-      'COMPARISON RESULTS',
-      '-'.repeat(60),
-      `Match Status: ${result.isExactMatch ? 'EXACT MATCH ✓' : 'DIFFERENCES FOUND ✗'}`,
-      `Similarity: ${result.similarity}%`,
-      '',
-      'Word Statistics:',
-      `  - Unchanged words: ${result.unchangedCount}`,
-      `  - Added words: ${result.addedCount}`,
-      `  - Removed words: ${result.removedCount}`,
-      '',
-      '-'.repeat(60),
-      'DOCUMENT A TEXT',
-      '-'.repeat(60),
-      result.documentAText,
-      '',
-      '-'.repeat(60),
-      'DOCUMENT B TEXT',
-      '-'.repeat(60),
-      result.documentBText,
-    ].filter(Boolean);
-
-    return lines.join('\n');
-  };
 
   return (
     <div className="space-y-6">
@@ -106,15 +46,9 @@ export function ComparisonResults({
                 </p>
               </div>
             </div>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={downloadReport}>
-                <Download className="h-4 w-4 mr-2" />
-                Download Report
-              </Button>
-              <Button onClick={onReset}>
-                Compare New Documents
-              </Button>
-            </div>
+            <Button onClick={onReset}>
+              Compare New Documents
+            </Button>
           </div>
         </CardContent>
       </Card>
