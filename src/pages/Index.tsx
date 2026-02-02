@@ -7,7 +7,8 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { FileUploadZone } from '@/components/FileUploadZone';
 import { ProcessingStatus } from '@/components/ProcessingStatus';
 import { ComparisonResults } from '@/components/ComparisonResults';
-import { extractTextFromDocument, DocumentExtractionResult } from '@/lib/documentExtractor';
+import { PasswordDialog } from '@/components/PasswordDialog';
+import { extractTextFromDocument, DocumentExtractionResult, PasswordRequiredError, IncorrectPasswordError } from '@/lib/documentExtractor';
 import { compareTexts, ComparisonResult } from '@/lib/textComparator';
 
 type AppState = 'upload' | 'processing' | 'results';
@@ -15,6 +16,12 @@ type AppState = 'upload' | 'processing' | 'results';
 interface ProcessingProgress {
   documentA: { progress: number; status: string };
   documentB: { progress: number; status: string };
+}
+
+interface PasswordRequest {
+  file: File;
+  documentLabel: 'A' | 'B';
+  error?: string;
 }
 
 const Index = () => {
@@ -32,6 +39,78 @@ const Index = () => {
   const [extractedA, setExtractedA] = useState<DocumentExtractionResult | null>(null);
   const [extractedB, setExtractedB] = useState<DocumentExtractionResult | null>(null);
   const [comparisonResult, setComparisonResult] = useState<ComparisonResult | null>(null);
+  
+  // Password handling state
+  const [passwordRequest, setPasswordRequest] = useState<PasswordRequest | null>(null);
+  const [passwordA, setPasswordA] = useState<string | undefined>(undefined);
+  const [passwordB, setPasswordB] = useState<string | undefined>(undefined);
+
+  const processDocument = async (
+    file: File,
+    documentLabel: 'A' | 'B',
+    password?: string
+  ): Promise<DocumentExtractionResult> => {
+    const progressKey = documentLabel === 'A' ? 'documentA' : 'documentB';
+    
+    try {
+      const result = await extractTextFromDocument(file, forceOCR, (progress, status) => {
+        setProcessingProgress(prev => ({
+          ...prev,
+          [progressKey]: { progress, status }
+        }));
+      }, password);
+      return result;
+    } catch (err) {
+      if (err instanceof PasswordRequiredError || err instanceof IncorrectPasswordError) {
+        // Pause processing and ask for password
+        return new Promise((resolve, reject) => {
+          setPasswordRequest({
+            file,
+            documentLabel,
+            error: err instanceof IncorrectPasswordError ? 'Incorrect password. Please try again.' : undefined
+          });
+          
+          // Store the resolve/reject for later use
+          (window as any).__passwordCallback = { resolve, reject, documentLabel };
+        });
+      }
+      throw err;
+    }
+  };
+  
+  const handlePasswordSubmit = async (password: string) => {
+    if (!passwordRequest) return;
+    
+    const { file, documentLabel } = passwordRequest;
+    const callback = (window as any).__passwordCallback;
+    
+    if (documentLabel === 'A') {
+      setPasswordA(password);
+    } else {
+      setPasswordB(password);
+    }
+    
+    setPasswordRequest(null);
+    
+    try {
+      const result = await processDocument(file, documentLabel, password);
+      callback?.resolve(result);
+    } catch (err) {
+      if (err instanceof PasswordRequiredError || err instanceof IncorrectPasswordError) {
+        // Will trigger password dialog again via processDocument
+        return;
+      }
+      callback?.reject(err);
+    }
+  };
+  
+  const handlePasswordCancel = () => {
+    setPasswordRequest(null);
+    setAppState('upload');
+    const callback = (window as any).__passwordCallback;
+    callback?.reject(new Error('Password entry cancelled'));
+    delete (window as any).__passwordCallback;
+  };
 
   const handleCompare = useCallback(async () => {
     if (!fileA || !fileB) return;
@@ -42,15 +121,14 @@ const Index = () => {
       documentA: { progress: 0, status: 'Starting...' },
       documentB: { progress: 0, status: 'Waiting...' }
     });
+    
+    // Reset passwords for new comparison
+    setPasswordA(undefined);
+    setPasswordB(undefined);
 
     try {
       // Process Document A
-      const resultA = await extractTextFromDocument(fileA, forceOCR, (progress, status) => {
-        setProcessingProgress(prev => ({
-          ...prev,
-          documentA: { progress, status }
-        }));
-      });
+      const resultA = await processDocument(fileA, 'A', passwordA);
       setExtractedA(resultA);
 
       // Process Document B
@@ -59,12 +137,7 @@ const Index = () => {
         documentB: { progress: 0, status: 'Starting...' }
       }));
       
-      const resultB = await extractTextFromDocument(fileB, forceOCR, (progress, status) => {
-        setProcessingProgress(prev => ({
-          ...prev,
-          documentB: { progress, status }
-        }));
-      });
+      const resultB = await processDocument(fileB, 'B', passwordB);
       setExtractedB(resultB);
 
       // Compare texts
@@ -74,10 +147,12 @@ const Index = () => {
 
     } catch (err) {
       console.error('Comparison error:', err);
-      setError(err instanceof Error ? err.message : 'An error occurred during processing.');
+      if ((err as Error).message !== 'Password entry cancelled') {
+        setError(err instanceof Error ? err.message : 'An error occurred during processing.');
+      }
       setAppState('upload');
     }
-  }, [fileA, fileB, forceOCR]);
+  }, [fileA, fileB, forceOCR, passwordA, passwordB]);
 
   const handleReset = useCallback(() => {
     setAppState('upload');
@@ -231,6 +306,15 @@ const Index = () => {
           />
         )}
       </main>
+      
+      {/* Password Dialog */}
+      <PasswordDialog
+        open={!!passwordRequest}
+        fileName={passwordRequest?.file.name || ''}
+        error={passwordRequest?.error}
+        onSubmit={handlePasswordSubmit}
+        onCancel={handlePasswordCancel}
+      />
 
       {/* Footer */}
       <footer className="border-t border-border mt-auto">
