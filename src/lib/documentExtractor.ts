@@ -1,4 +1,4 @@
-import { extractTextFromPDF, getPDFPagesAsImages } from './pdfExtractor';
+import { extractTextFromPDF, getPDFPagesAsImages, PasswordRequiredError, IncorrectPasswordError } from './pdfExtractor';
 import { extractTextFromWord } from './wordExtractor';
 import { performOCR } from './ocrProcessor';
 
@@ -10,10 +10,13 @@ export interface DocumentExtractionResult {
   ocrConfidence?: number;
 }
 
+export { PasswordRequiredError, IncorrectPasswordError };
+
 export async function extractTextFromDocument(
   file: File,
   forceOCR: boolean = false,
-  onProgress?: (progress: number, status: string) => void
+  onProgress?: (progress: number, status: string) => void,
+  password?: string
 ): Promise<DocumentExtractionResult> {
   const fileName = file.name.toLowerCase();
   const isPDF = fileName.endsWith('.pdf');
@@ -36,13 +39,13 @@ export async function extractTextFromDocument(
   
   // PDF processing
   onProgress?.(0, 'Processing PDF...');
-  const pdfResult = await extractTextFromPDF(file, onProgress);
+  const pdfResult = await extractTextFromPDF(file, onProgress, password);
   
   // Check if OCR is needed
   if (forceOCR || pdfResult.isScanned) {
     onProgress?.(50, 'PDF appears to be scanned. Starting OCR...');
     
-    const images = await getPDFPagesAsImages(file, onProgress);
+    const images = await getPDFPagesAsImages(file, onProgress, password);
     const ocrResult = await performOCR(images, onProgress);
     
     onProgress?.(100, 'OCR complete');

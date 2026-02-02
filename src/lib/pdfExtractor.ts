@@ -9,17 +9,67 @@ export interface PDFExtractionResult {
   isScanned: boolean;
 }
 
+export class PasswordRequiredError extends Error {
+  constructor() {
+    super('PDF is password protected');
+    this.name = 'PasswordRequiredError';
+  }
+}
+
+export class IncorrectPasswordError extends Error {
+  constructor() {
+    super('Incorrect password');
+    this.name = 'IncorrectPasswordError';
+  }
+}
+
+export async function checkPDFPassword(file: File): Promise<boolean> {
+  const arrayBuffer = await file.arrayBuffer();
+  try {
+    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+    await loadingTask.promise;
+    return false; // Not password protected
+  } catch (error: any) {
+    if (error?.name === 'PasswordException') {
+      return true; // Password protected
+    }
+    throw error;
+  }
+}
+
 export async function extractTextFromPDF(
   file: File,
-  onProgress?: (progress: number, status: string) => void
+  onProgress?: (progress: number, status: string) => void,
+  password?: string
 ): Promise<PDFExtractionResult> {
   const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  
+  onProgress?.(5, 'Loading PDF...');
+  
+  let pdf;
+  try {
+    const loadingTask = pdfjsLib.getDocument({ 
+      data: arrayBuffer,
+      password: password || undefined
+    });
+    pdf = await loadingTask.promise;
+  } catch (error: any) {
+    if (error?.name === 'PasswordException') {
+      if (error.code === 1) {
+        // Need a password
+        throw new PasswordRequiredError();
+      } else if (error.code === 2) {
+        // Incorrect password
+        throw new IncorrectPasswordError();
+      }
+    }
+    throw error;
+  }
   
   let fullText = '';
   const pageCount = pdf.numPages;
   
-  onProgress?.(10, 'Loading PDF...');
+  onProgress?.(10, 'Extracting text...');
   
   for (let i = 1; i <= pageCount; i++) {
     const page = await pdf.getPage(i);
@@ -42,9 +92,12 @@ export async function extractTextFromPDF(
   };
 }
 
-export async function getPDFPageAsImage(file: File, pageNumber: number = 1): Promise<Blob> {
+export async function getPDFPageAsImage(file: File, pageNumber: number = 1, password?: string): Promise<Blob> {
   const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const pdf = await pdfjsLib.getDocument({ 
+    data: arrayBuffer,
+    password: password || undefined
+  }).promise;
   const page = await pdf.getPage(pageNumber);
   
   const scale = 2; // Higher scale for better OCR
@@ -67,10 +120,14 @@ export async function getPDFPageAsImage(file: File, pageNumber: number = 1): Pro
 
 export async function getPDFPagesAsImages(
   file: File,
-  onProgress?: (progress: number, status: string) => void
+  onProgress?: (progress: number, status: string) => void,
+  password?: string
 ): Promise<Blob[]> {
   const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const pdf = await pdfjsLib.getDocument({ 
+    data: arrayBuffer,
+    password: password || undefined
+  }).promise;
   const images: Blob[] = [];
   
   for (let i = 1; i <= pdf.numPages; i++) {
