@@ -1,10 +1,11 @@
 import { useState, useCallback } from 'react';
-import { Shield, FileText, Scan, Lock, ArrowRight, AlertCircle, Play } from 'lucide-react';
+import { Shield, FileText, Scan, Lock, ArrowRight, AlertCircle, Play, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { DocumentInputZone, InputMode } from '@/components/DocumentInputZone';
+import { DocumentSlot, AddDocumentSlot } from '@/components/DocumentSlot';
+import { ReferenceTextInput } from '@/components/ReferenceTextInput';
 import { ProcessingStatus } from '@/components/ProcessingStatus';
 import { ComparisonResults } from '@/components/ComparisonResults';
 import { PasswordDialog } from '@/components/PasswordDialog';
@@ -14,72 +15,83 @@ import { demoSetMatching, demoSetMismatched, createDemoFile } from '@/lib/demoDo
 
 type AppState = 'upload' | 'processing' | 'results';
 
+interface DocumentInput {
+  id: string;
+  file: File | null;
+}
+
 interface ProcessingProgress {
-  documentA: { progress: number; status: string };
-  documentB: { progress: number; status: string };
+  [key: string]: { progress: number; status: string };
 }
 
 interface PasswordRequest {
   file: File;
-  documentLabel: 'A' | 'B';
+  documentId: string;
   error?: string;
 }
 
 const Index = () => {
   const [appState, setAppState] = useState<AppState>('upload');
-  const [fileA, setFileA] = useState<File | null>(null);
-  const [fileB, setFileB] = useState<File | null>(null);
-  const [textA, setTextA] = useState('');
-  const [textB, setTextB] = useState('');
-  const [inputModeA, setInputModeA] = useState<InputMode>('file');
-  const [inputModeB, setInputModeB] = useState<InputMode>('file');
+  const [documents, setDocuments] = useState<DocumentInput[]>([
+    { id: 'doc-1', file: null },
+    { id: 'doc-2', file: null }
+  ]);
+  const [referenceText, setReferenceText] = useState('');
   const [forceOCR, setForceOCR] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  const [processingProgress, setProcessingProgress] = useState<ProcessingProgress>({
-    documentA: { progress: 0, status: 'Waiting...' },
-    documentB: { progress: 0, status: 'Waiting...' }
-  });
-  
-  const [extractedA, setExtractedA] = useState<DocumentExtractionResult | null>(null);
-  const [extractedB, setExtractedB] = useState<DocumentExtractionResult | null>(null);
+  const [processingProgress, setProcessingProgress] = useState<ProcessingProgress>({});
+  const [extractedResults, setExtractedResults] = useState<Map<string, DocumentExtractionResult>>(new Map());
   const [comparisonResult, setComparisonResult] = useState<ComparisonResult | null>(null);
   
   // Password handling state
   const [passwordRequest, setPasswordRequest] = useState<PasswordRequest | null>(null);
-  const [passwordA, setPasswordA] = useState<string | undefined>(undefined);
-  const [passwordB, setPasswordB] = useState<string | undefined>(undefined);
+  const [passwords, setPasswords] = useState<Map<string, string>>(new Map());
   
   // Demo mode state
-  const [demoContent, setDemoContent] = useState<{ a: string; b: string } | null>(null);
+  const [demoContent, setDemoContent] = useState<Map<string, string> | null>(null);
+
+  const addDocument = useCallback(() => {
+    if (documents.length >= 3) return;
+    const newId = `doc-${Date.now()}`;
+    setDocuments(prev => [...prev, { id: newId, file: null }]);
+  }, [documents.length]);
+
+  const removeDocument = useCallback((id: string) => {
+    if (documents.length <= 2) return;
+    setDocuments(prev => prev.filter(d => d.id !== id));
+  }, [documents.length]);
+
+  const updateDocumentFile = useCallback((id: string, file: File | null) => {
+    setDocuments(prev => prev.map(d => d.id === id ? { ...d, file } : d));
+    if (!file) {
+      setDemoContent(null);
+    }
+  }, []);
 
   const processDocument = async (
     file: File,
-    documentLabel: 'A' | 'B',
+    documentId: string,
     password?: string
   ): Promise<DocumentExtractionResult> => {
-    const progressKey = documentLabel === 'A' ? 'documentA' : 'documentB';
-    
     try {
       const result = await extractTextFromDocument(file, forceOCR, (progress, status) => {
         setProcessingProgress(prev => ({
           ...prev,
-          [progressKey]: { progress, status }
+          [documentId]: { progress, status }
         }));
       }, password);
       return result;
     } catch (err) {
       if (err instanceof PasswordRequiredError || err instanceof IncorrectPasswordError) {
-        // Pause processing and ask for password
         return new Promise((resolve, reject) => {
           setPasswordRequest({
             file,
-            documentLabel,
+            documentId,
             error: err instanceof IncorrectPasswordError ? 'Incorrect password. Please try again.' : undefined
           });
           
-          // Store the resolve/reject for later use
-          (window as any).__passwordCallback = { resolve, reject, documentLabel };
+          (window as any).__passwordCallback = { resolve, reject, documentId };
         });
       }
       throw err;
@@ -89,23 +101,17 @@ const Index = () => {
   const handlePasswordSubmit = async (password: string) => {
     if (!passwordRequest) return;
     
-    const { file, documentLabel } = passwordRequest;
+    const { file, documentId } = passwordRequest;
     const callback = (window as any).__passwordCallback;
     
-    if (documentLabel === 'A') {
-      setPasswordA(password);
-    } else {
-      setPasswordB(password);
-    }
-    
+    setPasswords(prev => new Map(prev).set(documentId, password));
     setPasswordRequest(null);
     
     try {
-      const result = await processDocument(file, documentLabel, password);
+      const result = await processDocument(file, documentId, password);
       callback?.resolve(result);
     } catch (err) {
       if (err instanceof PasswordRequiredError || err instanceof IncorrectPasswordError) {
-        // Will trigger password dialog again via processDocument
         return;
       }
       callback?.reject(err);
@@ -121,70 +127,84 @@ const Index = () => {
   };
 
   const handleCompare = useCallback(async () => {
-    const hasInputA = inputModeA === 'file' ? !!fileA : textA.trim().length > 0;
-    const hasInputB = inputModeB === 'file' ? !!fileB : textB.trim().length > 0;
+    const filledDocuments = documents.filter(d => d.file);
+    const hasReferenceText = referenceText.trim().length > 0;
+    const totalInputs = filledDocuments.length + (hasReferenceText ? 1 : 0);
     
-    if (!hasInputA || !hasInputB) return;
+    if (totalInputs < 2) return;
     
     setError(null);
     setAppState('processing');
-    setProcessingProgress({
-      documentA: { progress: 0, status: 'Starting...' },
-      documentB: { progress: 0, status: 'Waiting...' }
-    });
     
-    // Reset passwords for new comparison
-    setPasswordA(undefined);
-    setPasswordB(undefined);
+    // Initialize progress
+    const initialProgress: ProcessingProgress = {};
+    filledDocuments.forEach(d => {
+      initialProgress[d.id] = { progress: 0, status: 'Waiting...' };
+    });
+    if (hasReferenceText) {
+      initialProgress['reference'] = { progress: 0, status: 'Waiting...' };
+    }
+    setProcessingProgress(initialProgress);
+    setPasswords(new Map());
 
     try {
-      let resultA: DocumentExtractionResult;
-      let resultB: DocumentExtractionResult;
+      const results = new Map<string, DocumentExtractionResult>();
 
-      // Process Document A
-      if (inputModeA === 'text') {
-        await new Promise(resolve => setTimeout(resolve, 200));
+      // Process documents
+      for (const doc of filledDocuments) {
         setProcessingProgress(prev => ({
           ...prev,
-          documentA: { progress: 100, status: 'Complete' }
+          [doc.id]: { progress: 0, status: 'Starting...' }
         }));
-        resultA = {
-          text: textA,
-          fileName: 'Custom Text A',
+
+        // Check for demo content
+        if (demoContent && demoContent.has(doc.id)) {
+          await new Promise(resolve => setTimeout(resolve, 300));
+          setProcessingProgress(prev => ({
+            ...prev,
+            [doc.id]: { progress: 100, status: 'Complete' }
+          }));
+          results.set(doc.id, {
+            text: demoContent.get(doc.id)!,
+            fileName: doc.file!.name,
+            fileType: 'pdf',
+            usedOCR: false
+          });
+        } else {
+          const result = await processDocument(doc.file!, doc.id, passwords.get(doc.id));
+          results.set(doc.id, result);
+        }
+      }
+
+      // Process reference text
+      if (hasReferenceText) {
+        setProcessingProgress(prev => ({
+          ...prev,
+          reference: { progress: 50, status: 'Processing text...' }
+        }));
+        await new Promise(resolve => setTimeout(resolve, 150));
+        setProcessingProgress(prev => ({
+          ...prev,
+          reference: { progress: 100, status: 'Complete' }
+        }));
+        results.set('reference', {
+          text: referenceText,
+          fileName: 'Reference Text',
           fileType: 'word',
           usedOCR: false
-        };
-      } else {
-        resultA = await processDocument(fileA!, 'A', passwordA);
+        });
       }
-      setExtractedA(resultA);
 
-      // Process Document B
-      setProcessingProgress(prev => ({
-        ...prev,
-        documentB: { progress: 0, status: 'Starting...' }
-      }));
+      setExtractedResults(results);
+
+      // Get comparison texts (use first two for now)
+      const resultEntries = Array.from(results.entries());
+      if (resultEntries.length >= 2) {
+        const [first, second] = resultEntries;
+        const comparison = compareTexts(first[1].text, second[1].text);
+        setComparisonResult(comparison);
+      }
       
-      if (inputModeB === 'text') {
-        await new Promise(resolve => setTimeout(resolve, 200));
-        setProcessingProgress(prev => ({
-          ...prev,
-          documentB: { progress: 100, status: 'Complete' }
-        }));
-        resultB = {
-          text: textB,
-          fileName: 'Custom Text B',
-          fileType: 'word',
-          usedOCR: false
-        };
-      } else {
-        resultB = await processDocument(fileB!, 'B', passwordB);
-      }
-      setExtractedB(resultB);
-
-      // Compare texts
-      const comparison = compareTexts(resultA.text, resultB.text);
-      setComparisonResult(comparison);
       setAppState('results');
 
     } catch (err) {
@@ -194,80 +214,53 @@ const Index = () => {
       }
       setAppState('upload');
     }
-  }, [fileA, fileB, textA, textB, inputModeA, inputModeB, forceOCR, passwordA, passwordB]);
+  }, [documents, referenceText, forceOCR, passwords, demoContent]);
 
   const handleReset = useCallback(() => {
     setAppState('upload');
-    setFileA(null);
-    setFileB(null);
-    setTextA('');
-    setTextB('');
-    setInputModeA('file');
-    setInputModeB('file');
-    setExtractedA(null);
-    setExtractedB(null);
+    setDocuments([
+      { id: 'doc-1', file: null },
+      { id: 'doc-2', file: null }
+    ]);
+    setReferenceText('');
+    setExtractedResults(new Map());
     setComparisonResult(null);
     setError(null);
     setDemoContent(null);
+  }, []);
+
+  const handleBackToUpload = useCallback(() => {
+    setAppState('upload');
+    setComparisonResult(null);
+    setExtractedResults(new Map());
   }, []);
   
   const loadDemoSet = useCallback((demoSet: typeof demoSetMatching) => {
     const fileA = createDemoFile(demoSet.documentA.fileName, demoSet.documentA.content);
     const fileB = createDemoFile(demoSet.documentB.fileName, demoSet.documentB.content);
-    setFileA(fileA);
-    setFileB(fileB);
-    setInputModeA('file');
-    setInputModeB('file');
-    setDemoContent({ a: demoSet.documentA.content, b: demoSet.documentB.content });
+    
+    const newDocs = [
+      { id: 'doc-1', file: fileA },
+      { id: 'doc-2', file: fileB }
+    ];
+    setDocuments(newDocs);
+    
+    const demoMap = new Map<string, string>();
+    demoMap.set('doc-1', demoSet.documentA.content);
+    demoMap.set('doc-2', demoSet.documentB.content);
+    setDemoContent(demoMap);
     setError(null);
   }, []);
-  
-  const runDemoComparison = useCallback(async () => {
-    if (!demoContent || !fileA || !fileB) return;
-    
-    setError(null);
-    setAppState('processing');
-    setProcessingProgress({
-      documentA: { progress: 0, status: 'Processing demo document...' },
-      documentB: { progress: 0, status: 'Waiting...' }
-    });
 
-    // Simulate processing for demo
-    await new Promise(resolve => setTimeout(resolve, 500));
-    setProcessingProgress(prev => ({
-      ...prev,
-      documentA: { progress: 100, status: 'Complete' }
-    }));
-    
-    const resultA: DocumentExtractionResult = {
-      text: demoContent.a,
-      fileName: fileA.name,
-      fileType: 'pdf',
-      usedOCR: false
-    };
-    setExtractedA(resultA);
+  const filledDocuments = documents.filter(d => d.file);
+  const hasReferenceText = referenceText.trim().length > 0;
+  const totalInputs = filledDocuments.length + (hasReferenceText ? 1 : 0);
+  const canCompare = totalInputs >= 2;
 
-    await new Promise(resolve => setTimeout(resolve, 500));
-    setProcessingProgress(prev => ({
-      ...prev,
-      documentB: { progress: 100, status: 'Complete' }
-    }));
-    
-    const resultB: DocumentExtractionResult = {
-      text: demoContent.b,
-      fileName: fileB.name,
-      fileType: 'pdf',
-      usedOCR: false
-    };
-    setExtractedB(resultB);
-
-    const comparison = compareTexts(resultA.text, resultB.text);
-    setComparisonResult(comparison);
-    setAppState('results');
-  }, [demoContent, fileA, fileB]);
-
-  const canCompare = (inputModeA === 'file' ? !!fileA : textA.trim().length > 0) && 
-                     (inputModeB === 'file' ? !!fileB : textB.trim().length > 0);
+  // Get first two results for display
+  const resultEntries = Array.from(extractedResults.entries());
+  const extractedA = resultEntries[0]?.[1] || null;
+  const extractedB = resultEntries[1]?.[1] || null;
 
   return (
     <div className="min-h-screen bg-background">
@@ -294,7 +287,7 @@ const Index = () => {
             <div>
               <h2 className="font-medium text-foreground">100% Private Processing</h2>
               <p className="text-sm text-muted-foreground mt-1">
-                Your documents never leave your device. All processing happens locally in your browser using client-side OCR and text extraction. No data is uploaded to any server.
+                Your documents never leave your device. All processing happens locally in your browser.
               </p>
             </div>
           </div>
@@ -309,40 +302,44 @@ const Index = () => {
               </Alert>
             )}
 
-            {/* Input Section */}
+            {/* Documents Section */}
             <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <FileText className="h-5 w-5" />
-                  Compare Documents or Text
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <FileText className="h-4 w-4" />
+                  Documents
                 </CardTitle>
                 <CardDescription>
-                  Upload documents or paste custom text to compare. You can mix file uploads and text input.
+                  Upload 2-3 documents to compare. Supports PDF and Word files.
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <DocumentInputZone
-                    label="Document A"
-                    file={fileA}
-                    customText={textA}
-                    inputMode={inputModeA}
-                    onFileSelect={setFileA}
-                    onFileRemove={() => setFileA(null)}
-                    onTextChange={setTextA}
-                    onModeChange={setInputModeA}
-                  />
-                  <DocumentInputZone
-                    label="Document B"
-                    file={fileB}
-                    customText={textB}
-                    inputMode={inputModeB}
-                    onFileSelect={setFileB}
-                    onFileRemove={() => setFileB(null)}
-                    onTextChange={setTextB}
-                    onModeChange={setInputModeB}
-                  />
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {documents.map((doc, index) => (
+                    <DocumentSlot
+                      key={doc.id}
+                      file={doc.file}
+                      onFileSelect={(file) => updateDocumentFile(doc.id, file)}
+                      onFileRemove={() => updateDocumentFile(doc.id, null)}
+                      onRemoveSlot={() => removeDocument(doc.id)}
+                      canRemove={documents.length > 2}
+                      placeholder={`Document ${index + 1}`}
+                    />
+                  ))}
+                  {documents.length < 3 && (
+                    <AddDocumentSlot onClick={addDocument} />
+                  )}
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* Reference Text Section */}
+            <Card>
+              <CardContent className="pt-6">
+                <ReferenceTextInput
+                  value={referenceText}
+                  onChange={setReferenceText}
+                />
               </CardContent>
             </Card>
 
@@ -359,7 +356,7 @@ const Index = () => {
                   <div>
                     <p className="text-sm font-medium text-foreground">Force OCR Processing</p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Enable this for scanned documents. OCR will extract text from images in the PDF.
+                      Enable for scanned documents to extract text from images.
                     </p>
                   </div>
                   <Switch
@@ -374,24 +371,30 @@ const Index = () => {
             <div className="flex justify-center">
               <Button
                 size="lg"
-                onClick={demoContent ? runDemoComparison : handleCompare}
+                onClick={handleCompare}
                 disabled={!canCompare}
                 className="px-8"
               >
-                Compare Documents
+                Compare {totalInputs >= 2 ? `(${totalInputs} inputs)` : ''}
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             </div>
+
+            {!canCompare && (
+              <p className="text-center text-sm text-muted-foreground">
+                Add at least 2 inputs (documents or reference text) to compare
+              </p>
+            )}
             
             {/* Demo Section */}
             <Card className="border-dashed">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   <Play className="h-4 w-4" />
-                  Try Demo Documents
+                  Try Demo
                 </CardTitle>
                 <CardDescription>
-                  Load sample documents to test the comparison feature.
+                  Load sample documents to test the comparison.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -401,9 +404,9 @@ const Index = () => {
                     onClick={() => loadDemoSet(demoSetMatching)}
                     className="h-auto py-3 flex flex-col items-start text-left"
                   >
-                    <span className="font-medium text-green-600 dark:text-green-400">✓ Matching Documents</span>
+                    <span className="font-medium text-green-600 dark:text-green-400">✓ Matching</span>
                     <span className="text-xs text-muted-foreground mt-1">
-                      Two identical contract documents
+                      Identical contracts
                     </span>
                   </Button>
                   <Button
@@ -411,9 +414,9 @@ const Index = () => {
                     onClick={() => loadDemoSet(demoSetMismatched)}
                     className="h-auto py-3 flex flex-col items-start text-left"
                   >
-                    <span className="font-medium text-amber-600 dark:text-amber-400">✗ Mismatched Documents</span>
+                    <span className="font-medium text-amber-600 dark:text-amber-400">✗ Mismatched</span>
                     <span className="text-xs text-muted-foreground mt-1">
-                      Contract with unauthorized changes
+                      Contract with changes
                     </span>
                   </Button>
                 </div>
@@ -425,33 +428,41 @@ const Index = () => {
         {appState === 'processing' && (
           <Card>
             <CardHeader>
-              <CardTitle>Processing Documents</CardTitle>
+              <CardTitle>Processing</CardTitle>
               <CardDescription>
-                Extracting text and performing comparison. This may take a moment for scanned documents.
+                Extracting text and comparing. This may take a moment for scanned documents.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <ProcessingStatus
-                progress={processingProgress.documentA.progress}
-                status={processingProgress.documentA.status}
-                documentLabel="Document A"
-              />
-              <ProcessingStatus
-                progress={processingProgress.documentB.progress}
-                status={processingProgress.documentB.status}
-                documentLabel="Document B"
-              />
+              {Object.entries(processingProgress).map(([id, progress]) => (
+                <ProcessingStatus
+                  key={id}
+                  progress={progress.progress}
+                  status={progress.status}
+                  documentLabel={id === 'reference' ? 'Reference Text' : documents.find(d => d.id === id)?.file?.name || id}
+                />
+              ))}
             </CardContent>
           </Card>
         )}
 
         {appState === 'results' && comparisonResult && extractedA && extractedB && (
-          <ComparisonResults
-            result={comparisonResult}
-            documentA={extractedA}
-            documentB={extractedB}
-            onReset={handleReset}
-          />
+          <div className="space-y-4">
+            <Button
+              variant="outline"
+              onClick={handleBackToUpload}
+              className="gap-2"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Back to Documents
+            </Button>
+            <ComparisonResults
+              result={comparisonResult}
+              documentA={extractedA}
+              documentB={extractedB}
+              onReset={handleReset}
+            />
+          </div>
         )}
       </main>
       
@@ -469,7 +480,6 @@ const Index = () => {
         <div className="container mx-auto px-4 py-6">
           <div className="text-center text-sm text-muted-foreground">
             <p>Built with privacy in mind. All processing happens in your browser.</p>
-            <p className="mt-1">No data is ever sent to external servers.</p>
           </div>
         </div>
       </footer>
