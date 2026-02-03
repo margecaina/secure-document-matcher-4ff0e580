@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { FileUploadZone } from '@/components/FileUploadZone';
+import { DocumentInputZone, InputMode } from '@/components/DocumentInputZone';
 import { ProcessingStatus } from '@/components/ProcessingStatus';
 import { ComparisonResults } from '@/components/ComparisonResults';
 import { PasswordDialog } from '@/components/PasswordDialog';
@@ -29,6 +29,10 @@ const Index = () => {
   const [appState, setAppState] = useState<AppState>('upload');
   const [fileA, setFileA] = useState<File | null>(null);
   const [fileB, setFileB] = useState<File | null>(null);
+  const [textA, setTextA] = useState('');
+  const [textB, setTextB] = useState('');
+  const [inputModeA, setInputModeA] = useState<InputMode>('file');
+  const [inputModeB, setInputModeB] = useState<InputMode>('file');
   const [forceOCR, setForceOCR] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
@@ -117,7 +121,10 @@ const Index = () => {
   };
 
   const handleCompare = useCallback(async () => {
-    if (!fileA || !fileB) return;
+    const hasInputA = inputModeA === 'file' ? !!fileA : textA.trim().length > 0;
+    const hasInputB = inputModeB === 'file' ? !!fileB : textB.trim().length > 0;
+    
+    if (!hasInputA || !hasInputB) return;
     
     setError(null);
     setAppState('processing');
@@ -131,8 +138,25 @@ const Index = () => {
     setPasswordB(undefined);
 
     try {
+      let resultA: DocumentExtractionResult;
+      let resultB: DocumentExtractionResult;
+
       // Process Document A
-      const resultA = await processDocument(fileA, 'A', passwordA);
+      if (inputModeA === 'text') {
+        await new Promise(resolve => setTimeout(resolve, 200));
+        setProcessingProgress(prev => ({
+          ...prev,
+          documentA: { progress: 100, status: 'Complete' }
+        }));
+        resultA = {
+          text: textA,
+          fileName: 'Custom Text A',
+          fileType: 'word',
+          usedOCR: false
+        };
+      } else {
+        resultA = await processDocument(fileA!, 'A', passwordA);
+      }
       setExtractedA(resultA);
 
       // Process Document B
@@ -141,7 +165,21 @@ const Index = () => {
         documentB: { progress: 0, status: 'Starting...' }
       }));
       
-      const resultB = await processDocument(fileB, 'B', passwordB);
+      if (inputModeB === 'text') {
+        await new Promise(resolve => setTimeout(resolve, 200));
+        setProcessingProgress(prev => ({
+          ...prev,
+          documentB: { progress: 100, status: 'Complete' }
+        }));
+        resultB = {
+          text: textB,
+          fileName: 'Custom Text B',
+          fileType: 'word',
+          usedOCR: false
+        };
+      } else {
+        resultB = await processDocument(fileB!, 'B', passwordB);
+      }
       setExtractedB(resultB);
 
       // Compare texts
@@ -156,12 +194,16 @@ const Index = () => {
       }
       setAppState('upload');
     }
-  }, [fileA, fileB, forceOCR, passwordA, passwordB]);
+  }, [fileA, fileB, textA, textB, inputModeA, inputModeB, forceOCR, passwordA, passwordB]);
 
   const handleReset = useCallback(() => {
     setAppState('upload');
     setFileA(null);
     setFileB(null);
+    setTextA('');
+    setTextB('');
+    setInputModeA('file');
+    setInputModeB('file');
     setExtractedA(null);
     setExtractedB(null);
     setComparisonResult(null);
@@ -174,6 +216,8 @@ const Index = () => {
     const fileB = createDemoFile(demoSet.documentB.fileName, demoSet.documentB.content);
     setFileA(fileA);
     setFileB(fileB);
+    setInputModeA('file');
+    setInputModeB('file');
     setDemoContent({ a: demoSet.documentA.content, b: demoSet.documentB.content });
     setError(null);
   }, []);
@@ -222,7 +266,8 @@ const Index = () => {
     setAppState('results');
   }, [demoContent, fileA, fileB]);
 
-  const canCompare = fileA && fileB;
+  const canCompare = (inputModeA === 'file' ? !!fileA : textA.trim().length > 0) && 
+                     (inputModeB === 'file' ? !!fileB : textB.trim().length > 0);
 
   return (
     <div className="min-h-screen bg-background">
@@ -264,30 +309,38 @@ const Index = () => {
               </Alert>
             )}
 
-            {/* Upload Section */}
+            {/* Input Section */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <FileText className="h-5 w-5" />
-                  Upload Documents
+                  Compare Documents or Text
                 </CardTitle>
                 <CardDescription>
-                  Select two PDF or Word documents to compare their text content.
+                  Upload documents or paste custom text to compare. You can mix file uploads and text input.
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <FileUploadZone
+                  <DocumentInputZone
                     label="Document A"
                     file={fileA}
+                    customText={textA}
+                    inputMode={inputModeA}
                     onFileSelect={setFileA}
                     onFileRemove={() => setFileA(null)}
+                    onTextChange={setTextA}
+                    onModeChange={setInputModeA}
                   />
-                  <FileUploadZone
+                  <DocumentInputZone
                     label="Document B"
                     file={fileB}
+                    customText={textB}
+                    inputMode={inputModeB}
                     onFileSelect={setFileB}
                     onFileRemove={() => setFileB(null)}
+                    onTextChange={setTextB}
+                    onModeChange={setInputModeB}
                   />
                 </div>
               </CardContent>
