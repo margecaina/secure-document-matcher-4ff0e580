@@ -1,10 +1,11 @@
 import { useState, useCallback } from 'react';
-import { Shield, FileText, Scan, Lock, ArrowRight, AlertCircle, Play } from 'lucide-react';
+import { Shield, FileText, Scan, Lock, ArrowRight, AlertCircle, Play, Search, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { DocumentInputZone, InputMode } from '@/components/DocumentInputZone';
+import { Textarea } from '@/components/ui/textarea';
+import { FileUploadSlot } from '@/components/FileUploadSlot';
 import { ProcessingStatus } from '@/components/ProcessingStatus';
 import { ComparisonResults } from '@/components/ComparisonResults';
 import { PasswordDialog } from '@/components/PasswordDialog';
@@ -29,10 +30,7 @@ const Index = () => {
   const [appState, setAppState] = useState<AppState>('upload');
   const [fileA, setFileA] = useState<File | null>(null);
   const [fileB, setFileB] = useState<File | null>(null);
-  const [textA, setTextA] = useState('');
-  const [textB, setTextB] = useState('');
-  const [inputModeA, setInputModeA] = useState<InputMode>('file');
-  const [inputModeB, setInputModeB] = useState<InputMode>('file');
+  const [searchText, setSearchText] = useState('');
   const [forceOCR, setForceOCR] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
@@ -44,6 +42,7 @@ const Index = () => {
   const [extractedA, setExtractedA] = useState<DocumentExtractionResult | null>(null);
   const [extractedB, setExtractedB] = useState<DocumentExtractionResult | null>(null);
   const [comparisonResult, setComparisonResult] = useState<ComparisonResult | null>(null);
+  const [textSearchResult, setTextSearchResult] = useState<{ inA: boolean; inB: boolean; searchTerm: string } | null>(null);
   
   // Password handling state
   const [passwordRequest, setPasswordRequest] = useState<PasswordRequest | null>(null);
@@ -70,7 +69,6 @@ const Index = () => {
       return result;
     } catch (err) {
       if (err instanceof PasswordRequiredError || err instanceof IncorrectPasswordError) {
-        // Pause processing and ask for password
         return new Promise((resolve, reject) => {
           setPasswordRequest({
             file,
@@ -78,7 +76,6 @@ const Index = () => {
             error: err instanceof IncorrectPasswordError ? 'Incorrect password. Please try again.' : undefined
           });
           
-          // Store the resolve/reject for later use
           (window as any).__passwordCallback = { resolve, reject, documentLabel };
         });
       }
@@ -105,7 +102,6 @@ const Index = () => {
       callback?.resolve(result);
     } catch (err) {
       if (err instanceof PasswordRequiredError || err instanceof IncorrectPasswordError) {
-        // Will trigger password dialog again via processDocument
         return;
       }
       callback?.reject(err);
@@ -121,10 +117,7 @@ const Index = () => {
   };
 
   const handleCompare = useCallback(async () => {
-    const hasInputA = inputModeA === 'file' ? !!fileA : textA.trim().length > 0;
-    const hasInputB = inputModeB === 'file' ? !!fileB : textB.trim().length > 0;
-    
-    if (!hasInputA || !hasInputB) return;
+    if (!fileA || !fileB) return;
     
     setError(null);
     setAppState('processing');
@@ -133,58 +126,36 @@ const Index = () => {
       documentB: { progress: 0, status: 'Waiting...' }
     });
     
-    // Reset passwords for new comparison
     setPasswordA(undefined);
     setPasswordB(undefined);
 
     try {
-      let resultA: DocumentExtractionResult;
-      let resultB: DocumentExtractionResult;
-
-      // Process Document A
-      if (inputModeA === 'text') {
-        await new Promise(resolve => setTimeout(resolve, 200));
-        setProcessingProgress(prev => ({
-          ...prev,
-          documentA: { progress: 100, status: 'Complete' }
-        }));
-        resultA = {
-          text: textA,
-          fileName: 'Custom Text A',
-          fileType: 'word',
-          usedOCR: false
-        };
-      } else {
-        resultA = await processDocument(fileA!, 'A', passwordA);
-      }
+      const resultA = await processDocument(fileA, 'A', passwordA);
       setExtractedA(resultA);
 
-      // Process Document B
       setProcessingProgress(prev => ({
         ...prev,
         documentB: { progress: 0, status: 'Starting...' }
       }));
       
-      if (inputModeB === 'text') {
-        await new Promise(resolve => setTimeout(resolve, 200));
-        setProcessingProgress(prev => ({
-          ...prev,
-          documentB: { progress: 100, status: 'Complete' }
-        }));
-        resultB = {
-          text: textB,
-          fileName: 'Custom Text B',
-          fileType: 'word',
-          usedOCR: false
-        };
-      } else {
-        resultB = await processDocument(fileB!, 'B', passwordB);
-      }
+      const resultB = await processDocument(fileB, 'B', passwordB);
       setExtractedB(resultB);
 
-      // Compare texts
       const comparison = compareTexts(resultA.text, resultB.text);
       setComparisonResult(comparison);
+      
+      // Check text search if provided
+      if (searchText.trim()) {
+        const searchLower = searchText.toLowerCase();
+        setTextSearchResult({
+          inA: resultA.text.toLowerCase().includes(searchLower),
+          inB: resultB.text.toLowerCase().includes(searchLower),
+          searchTerm: searchText.trim()
+        });
+      } else {
+        setTextSearchResult(null);
+      }
+      
       setAppState('results');
 
     } catch (err) {
@@ -194,19 +165,22 @@ const Index = () => {
       }
       setAppState('upload');
     }
-  }, [fileA, fileB, textA, textB, inputModeA, inputModeB, forceOCR, passwordA, passwordB]);
+  }, [fileA, fileB, searchText, forceOCR, passwordA, passwordB]);
 
-  const handleReset = useCallback(() => {
+  const handleBackToUpload = useCallback(() => {
+    setAppState('upload');
+    // Keep files and search text - don't reset them
+  }, []);
+
+  const handleFullReset = useCallback(() => {
     setAppState('upload');
     setFileA(null);
     setFileB(null);
-    setTextA('');
-    setTextB('');
-    setInputModeA('file');
-    setInputModeB('file');
+    setSearchText('');
     setExtractedA(null);
     setExtractedB(null);
     setComparisonResult(null);
+    setTextSearchResult(null);
     setError(null);
     setDemoContent(null);
   }, []);
@@ -216,8 +190,6 @@ const Index = () => {
     const fileB = createDemoFile(demoSet.documentB.fileName, demoSet.documentB.content);
     setFileA(fileA);
     setFileB(fileB);
-    setInputModeA('file');
-    setInputModeB('file');
     setDemoContent({ a: demoSet.documentA.content, b: demoSet.documentB.content });
     setError(null);
   }, []);
@@ -232,7 +204,6 @@ const Index = () => {
       documentB: { progress: 0, status: 'Waiting...' }
     });
 
-    // Simulate processing for demo
     await new Promise(resolve => setTimeout(resolve, 500));
     setProcessingProgress(prev => ({
       ...prev,
@@ -263,11 +234,22 @@ const Index = () => {
 
     const comparison = compareTexts(resultA.text, resultB.text);
     setComparisonResult(comparison);
+    
+    if (searchText.trim()) {
+      const searchLower = searchText.toLowerCase();
+      setTextSearchResult({
+        inA: resultA.text.toLowerCase().includes(searchLower),
+        inB: resultB.text.toLowerCase().includes(searchLower),
+        searchTerm: searchText.trim()
+      });
+    } else {
+      setTextSearchResult(null);
+    }
+    
     setAppState('results');
-  }, [demoContent, fileA, fileB]);
+  }, [demoContent, fileA, fileB, searchText]);
 
-  const canCompare = (inputModeA === 'file' ? !!fileA : textA.trim().length > 0) && 
-                     (inputModeB === 'file' ? !!fileB : textB.trim().length > 0);
+  const canCompare = !!fileA && !!fileB;
 
   return (
     <div className="min-h-screen bg-background">
@@ -294,7 +276,7 @@ const Index = () => {
             <div>
               <h2 className="font-medium text-foreground">100% Private Processing</h2>
               <p className="text-sm text-muted-foreground mt-1">
-                Your documents never leave your device. All processing happens locally in your browser using client-side OCR and text extraction. No data is uploaded to any server.
+                Your documents never leave your device. All processing happens locally in your browser.
               </p>
             </div>
           </div>
@@ -309,40 +291,58 @@ const Index = () => {
               </Alert>
             )}
 
-            {/* Input Section */}
+            {/* Upload Section */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <FileText className="h-5 w-5" />
-                  Compare Documents or Text
+                  Upload Documents
                 </CardTitle>
                 <CardDescription>
-                  Upload documents or paste custom text to compare. You can mix file uploads and text input.
+                  Upload two documents to compare them side by side.
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <DocumentInputZone
-                    label="Document A"
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FileUploadSlot
                     file={fileA}
-                    customText={textA}
-                    inputMode={inputModeA}
                     onFileSelect={setFileA}
                     onFileRemove={() => setFileA(null)}
-                    onTextChange={setTextA}
-                    onModeChange={setInputModeA}
+                    placeholder="First document (PDF/Word)"
                   />
-                  <DocumentInputZone
-                    label="Document B"
+                  <FileUploadSlot
                     file={fileB}
-                    customText={textB}
-                    inputMode={inputModeB}
                     onFileSelect={setFileB}
                     onFileRemove={() => setFileB(null)}
-                    onTextChange={setTextB}
-                    onModeChange={setInputModeB}
+                    placeholder="Second document (PDF/Word)"
                   />
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* Text Search Section */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Search className="h-4 w-4" />
+                  Text Search (Optional)
+                </CardTitle>
+                <CardDescription>
+                  Check if specific text appears in the uploaded documents.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Textarea
+                  placeholder="Enter text to search for in both documents..."
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                  className="min-h-[80px] resize-none"
+                />
+                {searchText.length > 0 && (
+                  <p className="text-xs text-muted-foreground mt-1.5">
+                    Will search for: "{searchText.length > 50 ? searchText.slice(0, 50) + '...' : searchText}"
+                  </p>
+                )}
               </CardContent>
             </Card>
 
@@ -359,7 +359,7 @@ const Index = () => {
                   <div>
                     <p className="text-sm font-medium text-foreground">Force OCR Processing</p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Enable this for scanned documents. OCR will extract text from images in the PDF.
+                      Enable for scanned documents to extract text from images.
                     </p>
                   </div>
                   <Switch
@@ -434,24 +434,65 @@ const Index = () => {
               <ProcessingStatus
                 progress={processingProgress.documentA.progress}
                 status={processingProgress.documentA.status}
-                documentLabel="Document A"
+                documentLabel={fileA?.name || 'Document 1'}
               />
               <ProcessingStatus
                 progress={processingProgress.documentB.progress}
                 status={processingProgress.documentB.status}
-                documentLabel="Document B"
+                documentLabel={fileB?.name || 'Document 2'}
               />
             </CardContent>
           </Card>
         )}
 
         {appState === 'results' && comparisonResult && extractedA && extractedB && (
-          <ComparisonResults
-            result={comparisonResult}
-            documentA={extractedA}
-            documentB={extractedB}
-            onReset={handleReset}
-          />
+          <div className="space-y-4">
+            {/* Text Search Results */}
+            {textSearchResult && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Search className="h-4 w-4" />
+                    Text Search Results
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-muted-foreground mb-3">
+                    Searching for: <span className="font-medium text-foreground">"{textSearchResult.searchTerm}"</span>
+                  </p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className={`p-3 rounded-lg border ${textSearchResult.inA ? 'bg-green-500/10 border-green-500/30' : 'bg-destructive/10 border-destructive/30'}`}>
+                      <p className="text-sm font-medium truncate">{extractedA.fileName}</p>
+                      <p className={`text-xs mt-1 ${textSearchResult.inA ? 'text-green-600 dark:text-green-400' : 'text-destructive'}`}>
+                        {textSearchResult.inA ? '✓ Found' : '✗ Not found'}
+                      </p>
+                    </div>
+                    <div className={`p-3 rounded-lg border ${textSearchResult.inB ? 'bg-green-500/10 border-green-500/30' : 'bg-destructive/10 border-destructive/30'}`}>
+                      <p className="text-sm font-medium truncate">{extractedB.fileName}</p>
+                      <p className={`text-xs mt-1 ${textSearchResult.inB ? 'text-green-600 dark:text-green-400' : 'text-destructive'}`}>
+                        {textSearchResult.inB ? '✓ Found' : '✗ Not found'}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+            
+            <ComparisonResults
+              result={comparisonResult}
+              documentA={extractedA}
+              documentB={extractedB}
+              onReset={handleFullReset}
+            />
+            
+            {/* Back Button */}
+            <div className="flex justify-center gap-3">
+              <Button variant="outline" onClick={handleBackToUpload}>
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Back to Documents
+              </Button>
+            </div>
+          </div>
         )}
       </main>
       
@@ -469,7 +510,6 @@ const Index = () => {
         <div className="container mx-auto px-4 py-6">
           <div className="text-center text-sm text-muted-foreground">
             <p>Built with privacy in mind. All processing happens in your browser.</p>
-            <p className="mt-1">No data is ever sent to external servers.</p>
           </div>
         </div>
       </footer>
