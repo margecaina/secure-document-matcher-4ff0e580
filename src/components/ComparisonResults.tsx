@@ -11,13 +11,15 @@ interface ComparisonResultsProps {
   documentA: DocumentExtractionResult;
   documentB: DocumentExtractionResult;
   onReset: () => void;
+  searchText?: string;
 }
 
 export function ComparisonResults({
   result,
   documentA,
   documentB,
-  onReset
+  onReset,
+  searchText
 }: ComparisonResultsProps) {
 
   return (
@@ -130,7 +132,7 @@ export function ComparisonResults({
             </p>
           </CardHeader>
           <CardContent>
-            <DiffViewer differences={result.differences} />
+            <DiffViewer differences={result.differences} highlightText={searchText} />
           </CardContent>
         </Card>
       )}

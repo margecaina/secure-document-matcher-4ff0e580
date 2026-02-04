@@ -1,10 +1,11 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Shield, FileText, Scan, Lock, ArrowRight, AlertCircle, Play, Search, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Textarea } from '@/components/ui/textarea';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { FileUploadSlot } from '@/components/FileUploadSlot';
 import { ProcessingStatus } from '@/components/ProcessingStatus';
 import { ComparisonResults } from '@/components/ComparisonResults';
@@ -26,6 +27,35 @@ interface PasswordRequest {
   error?: string;
 }
 
+// Single document viewer with search highlighting
+function SingleDocViewer({ text, highlightText }: { text: string; highlightText?: string }) {
+  const content = useMemo(() => {
+    if (!highlightText?.trim()) return text;
+    
+    const regex = new RegExp(`(${highlightText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    const parts = text.split(regex);
+    
+    return parts.map((part, i) => {
+      if (part.toLowerCase() === highlightText.toLowerCase()) {
+        return (
+          <mark key={i} className="bg-yellow-400/60 dark:bg-yellow-500/40 text-foreground rounded px-0.5">
+            {part}
+          </mark>
+        );
+      }
+      return part;
+    });
+  }, [text, highlightText]);
+
+  return (
+    <ScrollArea className="h-[400px] rounded-lg border border-border bg-card">
+      <div className="p-4 font-mono text-sm leading-relaxed whitespace-pre-wrap">
+        {content}
+      </div>
+    </ScrollArea>
+  );
+}
+
 const Index = () => {
   const [appState, setAppState] = useState<AppState>('upload');
   const [fileA, setFileA] = useState<File | null>(null);
@@ -43,6 +73,7 @@ const Index = () => {
   const [extractedB, setExtractedB] = useState<DocumentExtractionResult | null>(null);
   const [comparisonResult, setComparisonResult] = useState<ComparisonResult | null>(null);
   const [textSearchResult, setTextSearchResult] = useState<{ inA: boolean; inB: boolean; searchTerm: string } | null>(null);
+  const [singleDocMode, setSingleDocMode] = useState(false);
   
   // Password handling state
   const [passwordRequest, setPasswordRequest] = useState<PasswordRequest | null>(null);
@@ -117,39 +148,54 @@ const Index = () => {
   };
 
   const handleCompare = useCallback(async () => {
-    if (!fileA || !fileB) return;
+    // Allow single doc mode if only one file and search text exists
+    const isSingleDocMode = (!!fileA !== !!fileB) && searchText.trim();
+    setSingleDocMode(!!isSingleDocMode);
+    
+    if (!isSingleDocMode && (!fileA || !fileB)) return;
     
     setError(null);
     setAppState('processing');
     setProcessingProgress({
-      documentA: { progress: 0, status: 'Starting...' },
-      documentB: { progress: 0, status: 'Waiting...' }
+      documentA: { progress: 0, status: fileA ? 'Starting...' : 'No document' },
+      documentB: { progress: 0, status: fileB ? 'Waiting...' : 'No document' }
     });
     
     setPasswordA(undefined);
     setPasswordB(undefined);
 
     try {
-      const resultA = await processDocument(fileA, 'A', passwordA);
-      setExtractedA(resultA);
-
-      setProcessingProgress(prev => ({
-        ...prev,
-        documentB: { progress: 0, status: 'Starting...' }
-      }));
+      let resultA: DocumentExtractionResult | null = null;
+      let resultB: DocumentExtractionResult | null = null;
       
-      const resultB = await processDocument(fileB, 'B', passwordB);
-      setExtractedB(resultB);
+      if (fileA) {
+        resultA = await processDocument(fileA, 'A', passwordA);
+        setExtractedA(resultA);
+      }
 
-      const comparison = compareTexts(resultA.text, resultB.text);
-      setComparisonResult(comparison);
+      if (fileB) {
+        setProcessingProgress(prev => ({
+          ...prev,
+          documentB: { progress: 0, status: 'Starting...' }
+        }));
+        resultB = await processDocument(fileB, 'B', passwordB);
+        setExtractedB(resultB);
+      }
+
+      // Compare if both documents exist
+      if (resultA && resultB) {
+        const comparison = compareTexts(resultA.text, resultB.text);
+        setComparisonResult(comparison);
+      } else {
+        setComparisonResult(null);
+      }
       
       // Check text search if provided
       if (searchText.trim()) {
         const searchLower = searchText.toLowerCase();
         setTextSearchResult({
-          inA: resultA.text.toLowerCase().includes(searchLower),
-          inB: resultB.text.toLowerCase().includes(searchLower),
+          inA: resultA ? resultA.text.toLowerCase().includes(searchLower) : false,
+          inB: resultB ? resultB.text.toLowerCase().includes(searchLower) : false,
           searchTerm: searchText.trim()
         });
       } else {
@@ -249,7 +295,8 @@ const Index = () => {
     setAppState('results');
   }, [demoContent, fileA, fileB, searchText]);
 
-  const canCompare = !!fileA && !!fileB;
+  // Can compare if both docs, or single doc + search text
+  const canCompare = (!!fileA && !!fileB) || ((!!fileA || !!fileB) && searchText.trim().length > 0);
 
   return (
     <div className="min-h-screen bg-background">
@@ -445,7 +492,7 @@ const Index = () => {
           </Card>
         )}
 
-        {appState === 'results' && comparisonResult && extractedA && extractedB && (
+        {appState === 'results' && (
           <div className="space-y-4">
             {/* Text Search Results */}
             {textSearchResult && (
@@ -460,30 +507,59 @@ const Index = () => {
                   <p className="text-sm text-muted-foreground mb-3">
                     Searching for: <span className="font-medium text-foreground">"{textSearchResult.searchTerm}"</span>
                   </p>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className={`p-3 rounded-lg border ${textSearchResult.inA ? 'bg-green-500/10 border-green-500/30' : 'bg-destructive/10 border-destructive/30'}`}>
-                      <p className="text-sm font-medium truncate">{extractedA.fileName}</p>
-                      <p className={`text-xs mt-1 ${textSearchResult.inA ? 'text-green-600 dark:text-green-400' : 'text-destructive'}`}>
-                        {textSearchResult.inA ? '✓ Found' : '✗ Not found'}
-                      </p>
-                    </div>
-                    <div className={`p-3 rounded-lg border ${textSearchResult.inB ? 'bg-green-500/10 border-green-500/30' : 'bg-destructive/10 border-destructive/30'}`}>
-                      <p className="text-sm font-medium truncate">{extractedB.fileName}</p>
-                      <p className={`text-xs mt-1 ${textSearchResult.inB ? 'text-green-600 dark:text-green-400' : 'text-destructive'}`}>
-                        {textSearchResult.inB ? '✓ Found' : '✗ Not found'}
-                      </p>
-                    </div>
+                  <div className={`grid gap-4 ${extractedA && extractedB ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                    {extractedA && (
+                      <div className={`p-3 rounded-lg border ${textSearchResult.inA ? 'bg-green-500/10 border-green-500/30' : 'bg-destructive/10 border-destructive/30'}`}>
+                        <p className="text-sm font-medium truncate">{extractedA.fileName}</p>
+                        <p className={`text-xs mt-1 ${textSearchResult.inA ? 'text-green-600 dark:text-green-400' : 'text-destructive'}`}>
+                          {textSearchResult.inA ? '✓ Found' : '✗ Not found'}
+                        </p>
+                      </div>
+                    )}
+                    {extractedB && (
+                      <div className={`p-3 rounded-lg border ${textSearchResult.inB ? 'bg-green-500/10 border-green-500/30' : 'bg-destructive/10 border-destructive/30'}`}>
+                        <p className="text-sm font-medium truncate">{extractedB.fileName}</p>
+                        <p className={`text-xs mt-1 ${textSearchResult.inB ? 'text-green-600 dark:text-green-400' : 'text-destructive'}`}>
+                          {textSearchResult.inB ? '✓ Found' : '✗ Not found'}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
             )}
             
-            <ComparisonResults
-              result={comparisonResult}
-              documentA={extractedA}
-              documentB={extractedB}
-              onReset={handleFullReset}
-            />
+            {/* Two-document comparison results */}
+            {comparisonResult && extractedA && extractedB && (
+              <ComparisonResults
+                result={comparisonResult}
+                documentA={extractedA}
+                documentB={extractedB}
+                onReset={handleFullReset}
+                searchText={searchText}
+              />
+            )}
+            
+            {/* Single document mode - show extracted text with highlighting */}
+            {singleDocMode && (extractedA || extractedB) && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    Document Content
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    {searchText && <span className="inline-block px-2 py-0.5 rounded bg-yellow-400/60 dark:bg-yellow-500/40 mr-2">Highlighted matches</span>}
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  <SingleDocViewer 
+                    text={(extractedA || extractedB)!.text} 
+                    highlightText={searchText} 
+                  />
+                </CardContent>
+              </Card>
+            )}
             
             {/* Back Button */}
             <div className="flex justify-center gap-3">
