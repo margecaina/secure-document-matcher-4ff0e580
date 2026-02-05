@@ -198,10 +198,11 @@ const Index = () => {
       documentB: { progress: 0, status: fileB ? 'Waiting...' : 'No document' },
       documentC: { progress: 0, status: fileC ? 'Waiting...' : 'No document' }
     });
-    
-    setPasswordA(undefined);
-    setPasswordB(undefined);
-    setPasswordC(undefined);
+
+    // Store current passwords before resetting (for retry scenarios)
+    const currentPasswordA = passwordA;
+    const currentPasswordB = passwordB;
+    const currentPasswordC = passwordC;
 
     try {
       let resultA: DocumentExtractionResult | null = null;
@@ -209,7 +210,7 @@ const Index = () => {
       let resultC: DocumentExtractionResult | null = null;
       
       if (fileA) {
-        resultA = await processDocument(fileA, 'A', passwordA);
+        resultA = await processDocument(fileA, 'A', currentPasswordA);
         setExtractedA(resultA);
       }
 
@@ -218,7 +219,7 @@ const Index = () => {
           ...prev,
           documentB: { progress: 0, status: 'Starting...' }
         }));
-        resultB = await processDocument(fileB, 'B', passwordB);
+        resultB = await processDocument(fileB, 'B', currentPasswordB);
         setExtractedB(resultB);
       }
 
@@ -227,7 +228,7 @@ const Index = () => {
           ...prev,
           documentC: { progress: 0, status: 'Starting...' }
         }));
-        resultC = await processDocument(fileC, 'C', passwordC);
+        resultC = await processDocument(fileC, 'C', currentPasswordC);
         setExtractedC(resultC);
       }
 
