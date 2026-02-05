@@ -1,29 +1,33 @@
 import { useState, useCallback, useMemo } from 'react';
-import { Shield, FileText, Scan, Lock, ArrowRight, AlertCircle, Play, Search, ArrowLeft } from 'lucide-react';
+import { Shield, FileText, Scan, Lock, ArrowRight, AlertCircle, Play, Search, ArrowLeft, Columns, AlignJustify } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { FileUploadSlot } from '@/components/FileUploadSlot';
 import { ProcessingStatus } from '@/components/ProcessingStatus';
 import { ComparisonResults } from '@/components/ComparisonResults';
 import { PasswordDialog } from '@/components/PasswordDialog';
+import { SideBySideViewer } from '@/components/SideBySideViewer';
 import { extractTextFromDocument, DocumentExtractionResult, PasswordRequiredError, IncorrectPasswordError } from '@/lib/documentExtractor';
 import { compareTexts, ComparisonResult } from '@/lib/textComparator';
 import { demoSetMatching, demoSetMismatched, createDemoFile } from '@/lib/demoDocuments';
 
 type AppState = 'upload' | 'processing' | 'results';
+type ViewMode = 'inline' | 'sidebyside';
 
 interface ProcessingProgress {
   documentA: { progress: number; status: string };
   documentB: { progress: number; status: string };
+  documentC: { progress: number; status: string };
 }
 
 interface PasswordRequest {
   file: File;
-  documentLabel: 'A' | 'B';
+  documentLabel: 'A' | 'B' | 'C';
   error?: string;
 }
 
@@ -60,35 +64,44 @@ const Index = () => {
   const [appState, setAppState] = useState<AppState>('upload');
   const [fileA, setFileA] = useState<File | null>(null);
   const [fileB, setFileB] = useState<File | null>(null);
+  const [fileC, setFileC] = useState<File | null>(null);
   const [searchText, setSearchText] = useState('');
+  const [resultsSearchText, setResultsSearchText] = useState('');
   const [forceOCR, setForceOCR] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>('inline');
   
   const [processingProgress, setProcessingProgress] = useState<ProcessingProgress>({
     documentA: { progress: 0, status: 'Waiting...' },
-    documentB: { progress: 0, status: 'Waiting...' }
+    documentB: { progress: 0, status: 'Waiting...' },
+    documentC: { progress: 0, status: 'Waiting...' }
   });
   
   const [extractedA, setExtractedA] = useState<DocumentExtractionResult | null>(null);
   const [extractedB, setExtractedB] = useState<DocumentExtractionResult | null>(null);
+  const [extractedC, setExtractedC] = useState<DocumentExtractionResult | null>(null);
   const [comparisonResult, setComparisonResult] = useState<ComparisonResult | null>(null);
-  const [textSearchResult, setTextSearchResult] = useState<{ inA: boolean; inB: boolean; searchTerm: string } | null>(null);
+  const [textSearchResult, setTextSearchResult] = useState<{ inA: boolean; inB: boolean; inC: boolean; searchTerm: string } | null>(null);
   const [singleDocMode, setSingleDocMode] = useState(false);
   
   // Password handling state
   const [passwordRequest, setPasswordRequest] = useState<PasswordRequest | null>(null);
   const [passwordA, setPasswordA] = useState<string | undefined>(undefined);
   const [passwordB, setPasswordB] = useState<string | undefined>(undefined);
+  const [passwordC, setPasswordC] = useState<string | undefined>(undefined);
   
   // Demo mode state
   const [demoContent, setDemoContent] = useState<{ a: string; b: string } | null>(null);
 
+  // Active search text (from results page if available, otherwise from upload)
+  const activeSearchText = resultsSearchText || searchText;
+
   const processDocument = async (
     file: File,
-    documentLabel: 'A' | 'B',
+    documentLabel: 'A' | 'B' | 'C',
     password?: string
   ): Promise<DocumentExtractionResult> => {
-    const progressKey = documentLabel === 'A' ? 'documentA' : 'documentB';
+    const progressKey = documentLabel === 'A' ? 'documentA' : documentLabel === 'B' ? 'documentB' : 'documentC';
     
     try {
       const result = await extractTextFromDocument(file, forceOCR, (progress, status) => {
@@ -122,8 +135,10 @@ const Index = () => {
     
     if (documentLabel === 'A') {
       setPasswordA(password);
-    } else {
+    } else if (documentLabel === 'B') {
       setPasswordB(password);
+    } else {
+      setPasswordC(password);
     }
     
     setPasswordRequest(null);
@@ -147,26 +162,51 @@ const Index = () => {
     delete (window as any).__passwordCallback;
   };
 
+  // Update search results when resultsSearchText changes
+  const updateSearchResults = useCallback((search: string) => {
+    if (search.trim()) {
+      const searchLower = search.toLowerCase();
+      setTextSearchResult({
+        inA: extractedA ? extractedA.text.toLowerCase().includes(searchLower) : false,
+        inB: extractedB ? extractedB.text.toLowerCase().includes(searchLower) : false,
+        inC: extractedC ? extractedC.text.toLowerCase().includes(searchLower) : false,
+        searchTerm: search.trim()
+      });
+    } else {
+      setTextSearchResult(null);
+    }
+  }, [extractedA, extractedB, extractedC]);
+
+  const handleResultsSearchChange = useCallback((value: string) => {
+    setResultsSearchText(value);
+    updateSearchResults(value);
+  }, [updateSearchResults]);
+
   const handleCompare = useCallback(async () => {
+    const docCount = [fileA, fileB, fileC].filter(Boolean).length;
     // Allow single doc mode if only one file and search text exists
-    const isSingleDocMode = (!!fileA !== !!fileB) && searchText.trim();
+    const isSingleDocMode = docCount === 1 && searchText.trim();
     setSingleDocMode(!!isSingleDocMode);
     
-    if (!isSingleDocMode && (!fileA || !fileB)) return;
+    if (!isSingleDocMode && docCount < 2) return;
     
     setError(null);
     setAppState('processing');
+    setResultsSearchText(searchText); // Copy search text to results
     setProcessingProgress({
       documentA: { progress: 0, status: fileA ? 'Starting...' : 'No document' },
-      documentB: { progress: 0, status: fileB ? 'Waiting...' : 'No document' }
+      documentB: { progress: 0, status: fileB ? 'Waiting...' : 'No document' },
+      documentC: { progress: 0, status: fileC ? 'Waiting...' : 'No document' }
     });
     
     setPasswordA(undefined);
     setPasswordB(undefined);
+    setPasswordC(undefined);
 
     try {
       let resultA: DocumentExtractionResult | null = null;
       let resultB: DocumentExtractionResult | null = null;
+      let resultC: DocumentExtractionResult | null = null;
       
       if (fileA) {
         resultA = await processDocument(fileA, 'A', passwordA);
@@ -182,7 +222,16 @@ const Index = () => {
         setExtractedB(resultB);
       }
 
-      // Compare if both documents exist
+      if (fileC) {
+        setProcessingProgress(prev => ({
+          ...prev,
+          documentC: { progress: 0, status: 'Starting...' }
+        }));
+        resultC = await processDocument(fileC, 'C', passwordC);
+        setExtractedC(resultC);
+      }
+
+      // Compare first two documents if both exist
       if (resultA && resultB) {
         const comparison = compareTexts(resultA.text, resultB.text);
         setComparisonResult(comparison);
@@ -196,6 +245,7 @@ const Index = () => {
         setTextSearchResult({
           inA: resultA ? resultA.text.toLowerCase().includes(searchLower) : false,
           inB: resultB ? resultB.text.toLowerCase().includes(searchLower) : false,
+          inC: resultC ? resultC.text.toLowerCase().includes(searchLower) : false,
           searchTerm: searchText.trim()
         });
       } else {
@@ -211,7 +261,7 @@ const Index = () => {
       }
       setAppState('upload');
     }
-  }, [fileA, fileB, searchText, forceOCR, passwordA, passwordB]);
+  }, [fileA, fileB, fileC, searchText, forceOCR, passwordA, passwordB, passwordC]);
 
   const handleBackToUpload = useCallback(() => {
     setAppState('upload');
@@ -222,9 +272,12 @@ const Index = () => {
     setAppState('upload');
     setFileA(null);
     setFileB(null);
+    setFileC(null);
     setSearchText('');
+    setResultsSearchText('');
     setExtractedA(null);
     setExtractedB(null);
+    setExtractedC(null);
     setComparisonResult(null);
     setTextSearchResult(null);
     setError(null);
@@ -236,6 +289,7 @@ const Index = () => {
     const fileB = createDemoFile(demoSet.documentB.fileName, demoSet.documentB.content);
     setFileA(fileA);
     setFileB(fileB);
+    setFileC(null);
     setDemoContent({ a: demoSet.documentA.content, b: demoSet.documentB.content });
     setError(null);
   }, []);
@@ -245,9 +299,11 @@ const Index = () => {
     
     setError(null);
     setAppState('processing');
+    setResultsSearchText(searchText);
     setProcessingProgress({
       documentA: { progress: 0, status: 'Processing demo document...' },
-      documentB: { progress: 0, status: 'Waiting...' }
+      documentB: { progress: 0, status: 'Waiting...' },
+      documentC: { progress: 0, status: 'No document' }
     });
 
     await new Promise(resolve => setTimeout(resolve, 500));
@@ -286,6 +342,7 @@ const Index = () => {
       setTextSearchResult({
         inA: resultA.text.toLowerCase().includes(searchLower),
         inB: resultB.text.toLowerCase().includes(searchLower),
+        inC: false,
         searchTerm: searchText.trim()
       });
     } else {
@@ -295,8 +352,9 @@ const Index = () => {
     setAppState('results');
   }, [demoContent, fileA, fileB, searchText]);
 
-  // Can compare if both docs, or single doc + search text
-  const canCompare = (!!fileA && !!fileB) || ((!!fileA || !!fileB) && searchText.trim().length > 0);
+  // Can compare if 2+ docs, or single doc + search text
+  const docCount = [fileA, fileB, fileC].filter(Boolean).length;
+  const canCompare = docCount >= 2 || (docCount === 1 && searchText.trim().length > 0);
 
   return (
     <div className="min-h-screen bg-background">
@@ -315,7 +373,7 @@ const Index = () => {
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-8 max-w-4xl">
+      <main className="container mx-auto px-4 py-8 max-w-5xl">
         {/* Privacy Banner */}
         <div className="mb-8 p-4 rounded-lg bg-primary/5 border border-primary/20">
           <div className="flex items-start gap-3">
@@ -346,22 +404,28 @@ const Index = () => {
                   Upload Documents
                 </CardTitle>
                 <CardDescription>
-                  Upload two documents to compare them side by side.
+                  Upload two or three documents to compare.
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <FileUploadSlot
                     file={fileA}
                     onFileSelect={setFileA}
                     onFileRemove={() => setFileA(null)}
-                    placeholder="First document (PDF/Word)"
+                    placeholder="First document"
                   />
                   <FileUploadSlot
                     file={fileB}
                     onFileSelect={setFileB}
                     onFileRemove={() => setFileB(null)}
-                    placeholder="Second document (PDF/Word)"
+                    placeholder="Second document"
+                  />
+                  <FileUploadSlot
+                    file={fileC}
+                    onFileSelect={setFileC}
+                    onFileRemove={() => setFileC(null)}
+                    placeholder="Third document (optional)"
                   />
                 </div>
               </CardContent>
@@ -380,7 +444,7 @@ const Index = () => {
               </CardHeader>
               <CardContent>
                 <Textarea
-                  placeholder="Enter text to search for in both documents..."
+                  placeholder="Enter text to search for in documents..."
                   value={searchText}
                   onChange={(e) => setSearchText(e.target.value)}
                   className="min-h-[80px] resize-none"
@@ -393,29 +457,59 @@ const Index = () => {
               </CardContent>
             </Card>
 
-            {/* OCR Option */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Scan className="h-4 w-4" />
-                  OCR Settings
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-foreground">Force OCR Processing</p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Enable for scanned documents to extract text from images.
-                    </p>
+            {/* View Mode & OCR Settings */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* View Mode Selection */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Columns className="h-4 w-4" />
+                    Comparison View
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ToggleGroup 
+                    type="single" 
+                    value={viewMode} 
+                    onValueChange={(v) => v && setViewMode(v as ViewMode)}
+                    className="justify-start"
+                  >
+                    <ToggleGroupItem value="inline" aria-label="Inline diff view">
+                      <AlignJustify className="h-4 w-4 mr-2" />
+                      Inline Diff
+                    </ToggleGroupItem>
+                    <ToggleGroupItem value="sidebyside" aria-label="Side by side view">
+                      <Columns className="h-4 w-4 mr-2" />
+                      Side by Side
+                    </ToggleGroupItem>
+                  </ToggleGroup>
+                </CardContent>
+              </Card>
+
+              {/* OCR Option */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Scan className="h-4 w-4" />
+                    OCR Settings
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Force OCR Processing</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Enable for scanned documents.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={forceOCR}
+                      onCheckedChange={setForceOCR}
+                    />
                   </div>
-                  <Switch
-                    checked={forceOCR}
-                    onCheckedChange={setForceOCR}
-                  />
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </div>
 
             {/* Compare Button */}
             <div className="flex justify-center">
@@ -478,36 +572,65 @@ const Index = () => {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <ProcessingStatus
-                progress={processingProgress.documentA.progress}
-                status={processingProgress.documentA.status}
-                documentLabel={fileA?.name || 'Document 1'}
-              />
-              <ProcessingStatus
-                progress={processingProgress.documentB.progress}
-                status={processingProgress.documentB.status}
-                documentLabel={fileB?.name || 'Document 2'}
-              />
+              {fileA && (
+                <ProcessingStatus
+                  progress={processingProgress.documentA.progress}
+                  status={processingProgress.documentA.status}
+                  documentLabel={fileA.name}
+                />
+              )}
+              {fileB && (
+                <ProcessingStatus
+                  progress={processingProgress.documentB.progress}
+                  status={processingProgress.documentB.status}
+                  documentLabel={fileB.name}
+                />
+              )}
+              {fileC && (
+                <ProcessingStatus
+                  progress={processingProgress.documentC.progress}
+                  status={processingProgress.documentC.status}
+                  documentLabel={fileC.name}
+                />
+              )}
             </CardContent>
           </Card>
         )}
 
         {appState === 'results' && (
           <div className="space-y-4">
+            {/* Post-comparison Search */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Search className="h-4 w-4" />
+                  Search in Documents
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Textarea
+                  placeholder="Search for text/clauses in extracted documents..."
+                  value={resultsSearchText}
+                  onChange={(e) => handleResultsSearchChange(e.target.value)}
+                  className="min-h-[60px] resize-none"
+                />
+              </CardContent>
+            </Card>
+
             {/* Text Search Results */}
             {textSearchResult && (
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Search className="h-4 w-4" />
-                    Text Search Results
+                    Search Results
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="text-sm text-muted-foreground mb-3">
                     Searching for: <span className="font-medium text-foreground">"{textSearchResult.searchTerm}"</span>
                   </p>
-                  <div className={`grid gap-4 ${extractedA && extractedB ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                  <div className={`grid gap-4 ${extractedC ? 'grid-cols-3' : extractedA && extractedB ? 'grid-cols-2' : 'grid-cols-1'}`}>
                     {extractedA && (
                       <div className={`p-3 rounded-lg border ${textSearchResult.inA ? 'bg-green-500/10 border-green-500/30' : 'bg-destructive/10 border-destructive/30'}`}>
                         <p className="text-sm font-medium truncate">{extractedA.fileName}</p>
@@ -524,6 +647,14 @@ const Index = () => {
                         </p>
                       </div>
                     )}
+                    {extractedC && (
+                      <div className={`p-3 rounded-lg border ${textSearchResult.inC ? 'bg-green-500/10 border-green-500/30' : 'bg-destructive/10 border-destructive/30'}`}>
+                        <p className="text-sm font-medium truncate">{extractedC.fileName}</p>
+                        <p className={`text-xs mt-1 ${textSearchResult.inC ? 'text-green-600 dark:text-green-400' : 'text-destructive'}`}>
+                          {textSearchResult.inC ? '✓ Found' : '✗ Not found'}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -531,17 +662,62 @@ const Index = () => {
             
             {/* Two-document comparison results */}
             {comparisonResult && extractedA && extractedB && (
-              <ComparisonResults
-                result={comparisonResult}
-                documentA={extractedA}
-                documentB={extractedB}
-                onReset={handleFullReset}
-                searchText={searchText}
-              />
+              viewMode === 'sidebyside' ? (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Side by Side Comparison</CardTitle>
+                    <p className="text-sm text-muted-foreground">
+                      {comparisonResult.isExactMatch 
+                        ? 'Documents match!' 
+                        : `${comparisonResult.similarity}% similarity`}
+                      {activeSearchText && <span className="ml-2 inline-block px-2 py-0.5 rounded bg-yellow-400/60 dark:bg-yellow-500/40">Search highlighted</span>}
+                    </p>
+                  </CardHeader>
+                  <CardContent>
+                    <SideBySideViewer
+                      textA={extractedA.text}
+                      textB={extractedB.text}
+                      labelA={extractedA.fileName}
+                      labelB={extractedB.fileName}
+                      highlightText={activeSearchText}
+                    />
+                  </CardContent>
+                </Card>
+              ) : (
+                <ComparisonResults
+                  result={comparisonResult}
+                  documentA={extractedA}
+                  documentB={extractedB}
+                  onReset={handleFullReset}
+                  searchText={activeSearchText}
+                />
+              )
+            )}
+
+            {/* Third document viewer */}
+            {extractedC && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    {extractedC.fileName}
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Third document content
+                    {activeSearchText && <span className="ml-2 inline-block px-2 py-0.5 rounded bg-yellow-400/60 dark:bg-yellow-500/40">Search highlighted</span>}
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  <SingleDocViewer 
+                    text={extractedC.text} 
+                    highlightText={activeSearchText} 
+                  />
+                </CardContent>
+              </Card>
             )}
             
             {/* Single document mode - show extracted text with highlighting */}
-            {singleDocMode && (extractedA || extractedB) && (
+            {singleDocMode && (extractedA || extractedB) && !extractedC && (
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base flex items-center gap-2">
@@ -549,13 +725,13 @@ const Index = () => {
                     Document Content
                   </CardTitle>
                   <p className="text-sm text-muted-foreground">
-                    {searchText && <span className="inline-block px-2 py-0.5 rounded bg-yellow-400/60 dark:bg-yellow-500/40 mr-2">Highlighted matches</span>}
+                    {activeSearchText && <span className="inline-block px-2 py-0.5 rounded bg-yellow-400/60 dark:bg-yellow-500/40 mr-2">Highlighted matches</span>}
                   </p>
                 </CardHeader>
                 <CardContent>
                   <SingleDocViewer 
                     text={(extractedA || extractedB)!.text} 
-                    highlightText={searchText} 
+                    highlightText={activeSearchText} 
                   />
                 </CardContent>
               </Card>
@@ -567,6 +743,11 @@ const Index = () => {
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Back to Documents
               </Button>
+              {viewMode === 'sidebyside' && (
+                <Button onClick={handleFullReset}>
+                  Compare New Documents
+                </Button>
+              )}
             </div>
           </div>
         )}
