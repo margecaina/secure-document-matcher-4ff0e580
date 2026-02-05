@@ -673,10 +673,9 @@ const Index = () => {
                       {activeSearchText && <span className="ml-2 inline-block px-2 py-0.5 rounded bg-yellow-400/60 dark:bg-yellow-500/40">Search highlighted</span>}
                     </p>
                   </CardHeader>
-                  <CardContent>
+                <CardContent>
                     <SideBySideViewer
-                      textA={extractedA.text}
-                      textB={extractedB.text}
+                      differences={comparisonResult.differences}
                       labelA={extractedA.fileName}
                       labelB={extractedB.fileName}
                       highlightText={activeSearchText}
