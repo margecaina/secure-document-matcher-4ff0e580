@@ -431,7 +431,7 @@ const Index = () => {
                   Upload two or three documents to compare.
                 </CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <FileUploadSlot
                     file={fileA}
@@ -452,101 +452,56 @@ const Index = () => {
                     placeholder="Third document (optional)"
                   />
                 </div>
-              </CardContent>
-            </Card>
 
-            {/* Text Search Section */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Search className="h-4 w-4" />
-                  Text Search (Optional)
-                </CardTitle>
-                <CardDescription>
-                  Check if specific text appears in the uploaded documents.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
+                {/* Inline search */}
                 <Textarea
-                  placeholder="Enter text to search for in documents..."
+                  placeholder="Search for specific text/clauses in documents (optional)..."
                   value={searchText}
                   onChange={(e) => setSearchText(e.target.value)}
-                  className="min-h-[80px] resize-none"
+                  className="min-h-[60px] resize-none"
                 />
-                {searchText.length > 0 && (
-                  <p className="text-xs text-muted-foreground mt-1.5">
-                    Will search for: "{searchText.length > 50 ? searchText.slice(0, 50) + '...' : searchText}"
-                  </p>
-                )}
+
+                {/* Compact settings row + compare button */}
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-4">
+                    <ToggleGroup 
+                      type="single" 
+                      value={viewMode} 
+                      onValueChange={(v) => v && setViewMode(v as ViewMode)}
+                      size="sm"
+                    >
+                      <ToggleGroupItem value="inline" aria-label="Inline diff">
+                        <AlignJustify className="h-3.5 w-3.5 mr-1" />
+                        Inline
+                      </ToggleGroupItem>
+                      <ToggleGroupItem value="sidebyside" aria-label="Side by side">
+                        <Columns className="h-3.5 w-3.5 mr-1" />
+                        Side by Side
+                      </ToggleGroupItem>
+                    </ToggleGroup>
+                    
+                    <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                      <Switch
+                        checked={forceOCR}
+                        onCheckedChange={setForceOCR}
+                        className="scale-75"
+                      />
+                      <span className="flex items-center gap-1">
+                        <Scan className="h-3 w-3" /> Force OCR
+                      </span>
+                    </label>
+                  </div>
+
+                  <Button
+                    onClick={demoContent ? runDemoComparison : handleCompare}
+                    disabled={!canCompare}
+                  >
+                    Compare
+                    <ArrowRight className="ml-1 h-4 w-4" />
+                  </Button>
+                </div>
               </CardContent>
             </Card>
-
-            {/* View Mode & OCR Settings */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* View Mode Selection */}
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Columns className="h-4 w-4" />
-                    Comparison View
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ToggleGroup 
-                    type="single" 
-                    value={viewMode} 
-                    onValueChange={(v) => v && setViewMode(v as ViewMode)}
-                    className="justify-start"
-                  >
-                    <ToggleGroupItem value="inline" aria-label="Inline diff view">
-                      <AlignJustify className="h-4 w-4 mr-2" />
-                      Inline Diff
-                    </ToggleGroupItem>
-                    <ToggleGroupItem value="sidebyside" aria-label="Side by side view">
-                      <Columns className="h-4 w-4 mr-2" />
-                      Side by Side
-                    </ToggleGroupItem>
-                  </ToggleGroup>
-                </CardContent>
-              </Card>
-
-              {/* OCR Option */}
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Scan className="h-4 w-4" />
-                    OCR Settings
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-foreground">Force OCR Processing</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Enable for scanned documents.
-                      </p>
-                    </div>
-                    <Switch
-                      checked={forceOCR}
-                      onCheckedChange={setForceOCR}
-                    />
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Compare Button */}
-            <div className="flex justify-center">
-              <Button
-                size="lg"
-                onClick={demoContent ? runDemoComparison : handleCompare}
-                disabled={!canCompare}
-                className="px-8"
-              >
-                Compare Documents
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
-            </div>
             
             {/* Demo Section */}
             <Card className="border-dashed">
