@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { Shield, FileText, Scan, Lock, ArrowRight, AlertCircle, Play, Search, ArrowLeft, Columns, AlignJustify } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -95,6 +95,30 @@ const Index = () => {
 
   // Active search text (from results page if available, otherwise from upload)
   const activeSearchText = resultsSearchText || searchText;
+
+  // Global paste handler — fills the first empty file slot with pasted image
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      if (appState !== 'upload') return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          const blob = item.getAsFile();
+          if (!blob) return;
+          const ext = blob.type.split('/')[1] || 'png';
+          const pastedFile = new File([blob], `pasted-image.${ext}`, { type: blob.type });
+          if (!fileA) { setFileA(pastedFile); return; }
+          if (!fileB) { setFileB(pastedFile); return; }
+          if (!fileC) { setFileC(pastedFile); return; }
+          return;
+        }
+      }
+    };
+    document.addEventListener('paste', handlePaste);
+    return () => document.removeEventListener('paste', handlePaste);
+  }, [appState, fileA, fileB, fileC]);
 
   const processDocument = async (
     file: File,

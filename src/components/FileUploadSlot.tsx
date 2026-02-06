@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useEffect, useRef } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Upload, FileCheck, X, Image } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -18,39 +18,10 @@ export function FileUploadSlot({
   placeholder = "Drop file here"
 }: FileUploadSlotProps) {
   const [isDragging, setIsDragging] = useState(false);
-  const [isFocused, setIsFocused] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  // Handle paste from clipboard
-  const handlePaste = useCallback((e: ClipboardEvent) => {
-    if (disabled || file) return;
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    for (const item of Array.from(items)) {
-      if (item.type.startsWith('image/')) {
-        e.preventDefault();
-        const blob = item.getAsFile();
-        if (blob) {
-          const pastedFile = new File([blob], `pasted-image.${blob.type.split('/')[1] || 'png'}`, { type: blob.type });
-          onFileSelect(pastedFile);
-        }
-        return;
-      }
-    }
-  }, [disabled, file, onFileSelect]);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el || !isFocused) return;
-    document.addEventListener('paste', handlePaste);
-    return () => document.removeEventListener('paste', handlePaste);
-  }, [handlePaste, isFocused]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    if (!disabled) {
-      setIsDragging(true);
-    }
+    if (!disabled) setIsDragging(true);
   }, [disabled]);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
@@ -61,9 +32,7 @@ export function FileUploadSlot({
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    
     if (disabled) return;
-    
     const droppedFile = e.dataTransfer.files[0];
     if (droppedFile && isValidFile(droppedFile)) {
       onFileSelect(droppedFile);
@@ -87,15 +56,9 @@ export function FileUploadSlot({
     const name = file.name.toLowerCase();
     return validTypes.includes(file.type) || 
            imageTypes.includes(file.type) ||
-           name.endsWith('.pdf') ||
-           name.endsWith('.docx') ||
-           name.endsWith('.doc') ||
-           name.endsWith('.png') ||
-           name.endsWith('.jpg') ||
-           name.endsWith('.jpeg') ||
-           name.endsWith('.webp') ||
-           name.endsWith('.bmp') ||
-           name.endsWith('.tiff');
+           name.endsWith('.pdf') || name.endsWith('.docx') || name.endsWith('.doc') ||
+           name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg') ||
+           name.endsWith('.webp') || name.endsWith('.bmp') || name.endsWith('.tiff');
   };
 
   const formatFileSize = (bytes: number): string => {
@@ -106,17 +69,12 @@ export function FileUploadSlot({
 
   return (
     <div
-      ref={containerRef}
-      tabIndex={0}
-      onFocus={() => setIsFocused(true)}
-      onBlur={() => setIsFocused(false)}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       className={cn(
-        "relative flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 transition-all duration-200 min-h-[120px] outline-none",
+        "relative flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 transition-all duration-200 min-h-[120px]",
         isDragging && "border-primary bg-primary/5",
-        isFocused && !file && "ring-2 ring-primary/30",
         file ? "border-primary/50 bg-primary/5" : "border-border hover:border-muted-foreground/50",
         disabled && "opacity-50 cursor-not-allowed",
         !disabled && !file && "cursor-pointer hover:bg-muted/50"
