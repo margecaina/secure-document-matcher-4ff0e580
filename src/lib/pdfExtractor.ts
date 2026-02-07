@@ -189,7 +189,8 @@ export async function getPDFPageAsImage(file: File, pageNumber: number = 1, pass
 export async function getPDFPagesAsImages(
   file: File,
   onProgress?: (progress: number, status: string) => void,
-  password?: string
+  password?: string,
+  maxPages?: number
 ): Promise<Blob[]> {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ 
@@ -197,9 +198,10 @@ export async function getPDFPagesAsImages(
     password: password || undefined
   }).promise;
   const images: Blob[] = [];
+  const totalPages = maxPages ? Math.min(maxPages, pdf.numPages) : pdf.numPages;
   
-  for (let i = 1; i <= pdf.numPages; i++) {
-    onProgress?.(50 + (i / pdf.numPages) * 20, `Converting page ${i}/${pdf.numPages} to image...`);
+  for (let i = 1; i <= totalPages; i++) {
+    onProgress?.(50 + (i / totalPages) * 20, `Converting page ${i}/${totalPages} to image...`);
     
     const page = await pdf.getPage(i);
     const scale = 2;

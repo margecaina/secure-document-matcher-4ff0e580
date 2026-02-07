@@ -17,9 +17,14 @@ function normalizeText(text: string): string {
     .replace(/\r/g, '\n')
     // Normalize table separators (tabs) to spaces
     .replace(/\t+/g, ' ')
+    // Remove punctuation for cleaner comparison (keep alphanumeric, spaces, newlines)
+    .replace(/[^\w\s\n]/g, ' ')
+    // Collapse whitespace
     .replace(/[ ]+/g, ' ')
     // Collapse multiple blank lines
     .replace(/\n{3,}/g, '\n\n')
+    // Normalize to lowercase for comparison
+    .toLowerCase()
     .trim();
 }
 
