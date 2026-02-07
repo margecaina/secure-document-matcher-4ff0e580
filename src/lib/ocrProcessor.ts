@@ -5,12 +5,37 @@ export interface OCRResult {
   confidence: number;
 }
 
+// Filter out OCR blocks that are likely logos, signatures, or decorative elements
+function filterOCRText(data: Tesseract.Page): string {
+  const lines = data.lines || [];
+  const filteredLines: string[] = [];
+
+  for (const line of lines) {
+    // Skip lines with very low confidence (likely logos/signatures/graphics)
+    if (line.confidence < 40) continue;
+
+    // Skip lines that are mostly non-alphanumeric (decorative elements)
+    const text = line.text.trim();
+    if (!text) continue;
+    const alphanumCount = (text.match(/[a-zA-Z0-9]/g) || []).length;
+    if (text.length > 3 && alphanumCount / text.length < 0.3) continue;
+
+    // Skip very short isolated fragments (likely OCR noise from logos)
+    if (text.length <= 2 && line.confidence < 70) continue;
+
+    filteredLines.push(text);
+  }
+
+  return filteredLines.join('\n');
+}
+
 export async function performOCR(
   images: Blob[],
   onProgress?: (progress: number, status: string) => void
 ): Promise<OCRResult> {
   let fullText = '';
   let totalConfidence = 0;
+  let validPages = 0;
   
   for (let i = 0; i < images.length; i++) {
     onProgress?.(
@@ -30,13 +55,17 @@ export async function performOCR(
       }
     });
     
-    fullText += result.data.text + '\n';
-    totalConfidence += result.data.confidence;
+    const filtered = filterOCRText(result.data);
+    if (filtered) {
+      fullText += filtered + '\n';
+      totalConfidence += result.data.confidence;
+      validPages++;
+    }
   }
   
   return {
     text: fullText.trim(),
-    confidence: totalConfidence / images.length
+    confidence: validPages > 0 ? totalConfidence / validPages : 0
   };
 }
 
@@ -54,8 +83,10 @@ export async function performOCROnSingleImage(
     }
   });
   
+  const filtered = filterOCRText(result.data);
+  
   return {
-    text: result.data.text.trim(),
+    text: filtered,
     confidence: result.data.confidence
   };
 }

@@ -9,6 +9,76 @@ export interface PDFExtractionResult {
   isScanned: boolean;
 }
 
+interface TextItem {
+  str: string;
+  transform: number[];
+  width: number;
+  height: number;
+}
+
+/**
+ * Reconstructs structured text from PDF text items using positional data.
+ * Groups items into rows by Y-coordinate and sorts by X within rows,
+ * preserving table layouts and multi-column content.
+ */
+function extractStructuredText(items: TextItem[]): string {
+  if (!items.length) return '';
+
+  // Filter to actual text items (skip empty strings)
+  const textItems = items.filter(item => item.str && item.str.trim());
+  if (!textItems.length) return '';
+
+  // Group items by approximate Y position (same row)
+  const rowTolerance = 3; // pixels
+  const rows: Map<number, TextItem[]> = new Map();
+
+  for (const item of textItems) {
+    const y = Math.round(item.transform[5]); // Y coordinate
+    let foundRow = false;
+    for (const [rowY] of rows) {
+      if (Math.abs(y - rowY) <= rowTolerance) {
+        rows.get(rowY)!.push(item);
+        foundRow = true;
+        break;
+      }
+    }
+    if (!foundRow) {
+      rows.set(y, [item]);
+    }
+  }
+
+  // Sort rows top-to-bottom (higher Y = higher on page in PDF coords)
+  const sortedRows = Array.from(rows.entries())
+    .sort(([a], [b]) => b - a);
+
+  const lines: string[] = [];
+  for (const [, rowItems] of sortedRows) {
+    // Sort items left-to-right by X coordinate
+    rowItems.sort((a, b) => a.transform[4] - b.transform[4]);
+
+    // Detect gaps between items for table column separation
+    let line = '';
+    for (let i = 0; i < rowItems.length; i++) {
+      const item = rowItems[i];
+      if (i > 0) {
+        const prevItem = rowItems[i - 1];
+        const prevEnd = prevItem.transform[4] + prevItem.width;
+        const gap = item.transform[4] - prevEnd;
+        // Large gap suggests a table column separator
+        if (gap > 15) {
+          line += '\t';
+        } else if (gap > 2) {
+          line += ' ';
+        }
+      }
+      line += item.str;
+    }
+    lines.push(line);
+  }
+
+  return lines.join('\n');
+}
+
 export class PasswordRequiredError extends Error {
   constructor() {
     super('PDF is password protected');
@@ -74,9 +144,7 @@ export async function extractTextFromPDF(
   for (let i = 1; i <= pageCount; i++) {
     const page = await pdf.getPage(i);
     const textContent = await page.getTextContent();
-    const pageText = textContent.items
-      .map((item: any) => item.str)
-      .join(' ');
+    const pageText = extractStructuredText(textContent.items as any[]);
     fullText += pageText + '\n';
     
     onProgress?.(10 + (i / pageCount) * 40, `Extracting page ${i}/${pageCount}...`);
