@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
-import { Shield, FileText, Scan, Lock, ArrowRight, AlertCircle, Play, Search, ArrowLeft, Columns, AlignJustify, X } from 'lucide-react';
+import { Shield, FileText, Scan, Lock, ArrowRight, AlertCircle, Play, Search, ArrowLeft, Columns, AlignJustify, X, ArrowLeftRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
@@ -429,13 +429,23 @@ const Index = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
                   <FileUploadSlot
                     file={fileA}
                     onFileSelect={setFileA}
                     onFileRemove={() => setFileA(null)}
                     placeholder="First document"
                   />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => { const tmp = fileA; setFileA(fileB); setFileB(tmp); }}
+                    disabled={!fileA && !fileB}
+                    className="rounded-full h-9 w-9 text-muted-foreground hover:text-primary"
+                    title="Swap documents"
+                  >
+                    <ArrowLeftRight className="h-4 w-4" />
+                  </Button>
                   <FileUploadSlot
                     file={fileB}
                     onFileSelect={setFileB}
