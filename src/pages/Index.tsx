@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
-import { Shield, FileText, Scan, Lock, ArrowRight, AlertCircle, Play, Search, ArrowLeft, Columns, AlignJustify } from 'lucide-react';
+import { Shield, FileText, Scan, Lock, ArrowRight, AlertCircle, Play, Search, ArrowLeft, Columns, AlignJustify, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
@@ -64,7 +64,7 @@ const Index = () => {
   const [appState, setAppState] = useState<AppState>('upload');
   const [fileA, setFileA] = useState<File | null>(null);
   const [fileB, setFileB] = useState<File | null>(null);
-  const [fileC, setFileC] = useState<File | null>(null);
+  const [fileC] = useState<File | null>(null);
   const [searchText, setSearchText] = useState('');
   const [resultsSearchText, setResultsSearchText] = useState('');
   const [forceOCR, setForceOCR] = useState(false);
@@ -111,7 +111,6 @@ const Index = () => {
           const pastedFile = new File([blob], `pasted-image.${ext}`, { type: blob.type });
           if (!fileA) { setFileA(pastedFile); return; }
           if (!fileB) { setFileB(pastedFile); return; }
-          if (!fileC) { setFileC(pastedFile); return; }
           return;
         }
       }
@@ -296,7 +295,6 @@ const Index = () => {
     setAppState('upload');
     setFileA(null);
     setFileB(null);
-    setFileC(null);
     setSearchText('');
     setResultsSearchText('');
     setExtractedA(null);
@@ -313,7 +311,6 @@ const Index = () => {
     const fileB = createDemoFile(demoSet.documentB.fileName, demoSet.documentB.content);
     setFileA(fileA);
     setFileB(fileB);
-    setFileC(null);
     setDemoContent({ a: demoSet.documentA.content, b: demoSet.documentB.content });
     setError(null);
   }, []);
@@ -377,7 +374,7 @@ const Index = () => {
   }, [demoContent, fileA, fileB, searchText]);
 
   // Can compare if 2+ docs, or single doc + search text
-  const docCount = [fileA, fileB, fileC].filter(Boolean).length;
+  const docCount = [fileA, fileB].filter(Boolean).length;
   const canCompare = docCount >= 2 || (docCount === 1 && searchText.trim().length > 0);
 
   return (
@@ -428,11 +425,11 @@ const Index = () => {
                   Upload Documents
                 </CardTitle>
                 <CardDescription>
-                  Upload two or three documents to compare.
+                  Upload two documents to compare.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <FileUploadSlot
                     file={fileA}
                     onFileSelect={setFileA}
@@ -445,13 +442,20 @@ const Index = () => {
                     onFileRemove={() => setFileB(null)}
                     placeholder="Second document"
                   />
-                  <FileUploadSlot
-                    file={fileC}
-                    onFileSelect={setFileC}
-                    onFileRemove={() => setFileC(null)}
-                    placeholder="Third document (optional)"
-                  />
                 </div>
+                {(fileA || fileB) && (
+                  <div className="flex justify-end">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => { setFileA(null); setFileB(null); setSearchText(''); }}
+                      className="text-muted-foreground hover:text-destructive"
+                    >
+                      <X className="h-4 w-4 mr-1" />
+                      Clear All
+                    </Button>
+                  </div>
+                )}
 
                 {/* Inline search */}
                 <Textarea
