@@ -15,7 +15,11 @@ function normalizeText(text: string): string {
   return text
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
-    .replace(/\s+/g, ' ')
+    // Normalize table separators (tabs) to spaces
+    .replace(/\t+/g, ' ')
+    .replace(/[ ]+/g, ' ')
+    // Collapse multiple blank lines
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
