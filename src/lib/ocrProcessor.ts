@@ -36,11 +36,19 @@ export async function performOCR(
   let fullText = '';
   let totalConfidence = 0;
   let validPages = 0;
+  const startTime = Date.now();
+  const CHUNK_SIZE = 25;
   
   for (let i = 0; i < images.length; i++) {
+    // ETA calculation
+    const elapsed = (Date.now() - startTime) / 1000;
+    const pagesPerSec = i > 0 ? i / elapsed : 0;
+    const remaining = pagesPerSec > 0 ? Math.round((images.length - i) / pagesPerSec) : 0;
+    const etaStr = i > 0 ? ` (~${formatETA(remaining)} remaining)` : '';
+    
     onProgress?.(
       70 + (i / images.length) * 25,
-      `Running OCR on page ${i + 1}/${images.length}...`
+      `OCR: Page ${i + 1}/${images.length}${etaStr}`
     );
     
     const result = await Tesseract.recognize(images[i], 'eng', {
@@ -49,7 +57,7 @@ export async function performOCR(
           const pageProgress = (i / images.length) + (m.progress / images.length);
           onProgress?.(
             70 + pageProgress * 25,
-            `OCR: Page ${i + 1}/${images.length} (${Math.round(m.progress * 100)}%)`
+            `OCR: Page ${i + 1}/${images.length} (${Math.round(m.progress * 100)}%)${etaStr}`
           );
         }
       }
@@ -61,12 +69,24 @@ export async function performOCR(
       totalConfidence += result.data.confidence;
       validPages++;
     }
+    
+    // Yield to UI every chunk
+    if ((i + 1) % CHUNK_SIZE === 0) {
+      await new Promise(r => setTimeout(r, 0));
+    }
   }
   
   return {
     text: fullText.trim(),
     confidence: validPages > 0 ? totalConfidence / validPages : 0
   };
+}
+
+function formatETA(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}m ${secs}s`;
 }
 
 export async function performOCROnSingleImage(
